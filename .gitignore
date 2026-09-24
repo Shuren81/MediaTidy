@@ -29,3 +29,4 @@ Thumbs.db
 __pycache__/
 # Impostazioni locali di Geany
 .geany/
+*.AppImage
