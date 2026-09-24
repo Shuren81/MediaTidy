@@ -1,226 +1,178 @@
 # MediaTidy
 
-Rinomina e organizza film e serie TV usando i metadati di TMDB, con GUI a due schede: Film e Serie TV.
+MediaTidy è un’applicazione desktop per Linux che rinomina e organizza film e serie TV usando i metadati di [TMDB](https://www.themoviedb.org/).
 
-### Versione 0.2.0 - Settembre 2026
+L’interfaccia grafica include due schede dedicate:
 
-### Struttura del progetto
+- **Film**
+- **Serie TV**
 
+L’applicazione consente di analizzare i file video, cercare i metadati corrispondenti, verificare i risultati proposti e quindi copiare, spostare o rinominare i file secondo una struttura ordinata.
 
-```
-MediaTidy/
-├── media_tidy.py # entry point
-├── config.py # configurazione
-├── localization.py # traduzioni
-├── text_utils.py # formattazione titoli
-├── media_operations.py # operazioni file
-├── tmdb_client.py # chiamate TMDB
-├── core/
-│ ├── movie_handler.py # gestione film
-│ ├── series_handler.py # gestione serie
-│ └── series_classifier.py # classificazione episodi
-├── ui/
-│ ├── main_window.py # finestra principale
-│ ├── movie_tab.py # scheda Film
-│ ├── series_tab.py # scheda Serie TV
-│ ├── widgets.py # widget comuni
-│ └── settings_dialog.py # dialogo opzioni
-└── logs/ # log operazioni
-```
+## Funzionalità
 
-## Avvio
+- Ricerca di film e serie TV tramite API TMDB.
+- Riconoscimento di titolo e anno dai nomi dei file.
+- Riconoscimento di stagioni ed episodi per le serie TV.
+- Recupero del titolo del singolo episodio.
+- Rinomina dei file video secondo regole configurabili.
+- Scelta tra modalità **Copia** e **Sposta**.
+- Rinomina direttamente nella cartella sorgente, quando appropriato.
+- Gestione dei duplicati: sovrascrittura, suffisso automatico, modifica manuale o salto.
+- Pulizia opzionale delle cartelle sorgenti vuote dopo uno spostamento.
+- Supporto per destinazioni locali e remote tramite SSH/rsync.
+- Download opzionale di poster da TMDB.
+- Interfaccia in italiano e inglese.
+- Log giornalieri e file CSV per le operazioni relative a film e serie TV.
+- Cartelle di destinazione separate per Film e Serie TV.
+- Percorso dei log personalizzabile dalla finestra **Opzioni**.
 
-Crea ambiente virtuale (consigliato):
+## Installazione
+
+### AppImage
+
+La versione consigliata per Linux è disponibile nella pagina [Releases](../../releases).
+
+1. Scarica il file AppImage più recente.
+2. Rendilo eseguibile:
+
+   ```bash
+   chmod +x MediaTidy-*.AppImage
+   ```
+
+3. Avvialo:
+
+   ```bash
+   ./MediaTidy-*.AppImage
+   ```
+
+In alternativa, dal file manager di Linux Mint, fai clic destro sul file, apri **Proprietà → Permessi**, abilita l’esecuzione come programma e apri il file.
+
+### Da sorgente
+
+Clona il repository ed esegui:
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-```
-
-### Installa dipendenze:
-
-```bash
 pip install -r requirements.txt
-```
-
-***Avvia il programma:***
-
-```bash
-python media_tidy.py
+python3 media_tidy.py
 ```
 
 ## Configurazione
 
-**Al primo avvio:**
+Alla prima esecuzione, apri **Opzioni** e configura almeno:
 
-  -  Clicca su Opzioni
+- La tua chiave API TMDB.
+- La cartella di destinazione per i film.
+- La cartella di destinazione per le serie TV.
+- La lingua usata per le ricerche TMDB.
+- La modalità operativa: copia o spostamento.
 
-   - Inserisci la chiave API TMDB
+Facoltativamente, puoi configurare:
 
-   - Imposta Destinazione Film
+- Regola di capitalizzazione dei titoli.
+- Smontaggio automatico del disco dopo l’elaborazione.
+- Rimozione delle cartelle sorgenti rimaste vuote.
+- Lingua dell’interfaccia.
+- Cartella personalizzata per log e CSV.
 
-   - Imposta Destinazione Serie TV
+## Log e CSV
 
-   - Scegli lingua TMDB
+Per impostazione predefinita, MediaTidy salva log e file CSV in:
 
-   - Clicca OK
+```text
+~/.local/share/MediaTidy/logs/
+```
 
-## Funzionalità
-- **Film**
+Dalla finestra **Opzioni** puoi selezionare un’altra cartella. Il programma crea la directory automaticamente quando deve scrivere un log o un CSV.
 
-    Riconoscimento automatico titolo e anno dal nome file
+I file generati includono normalmente:
 
-    Ricerca e conferma manuale su TMDB
+```text
+MediaTidy_YYYY-MM-DD.log
+MediaTidy_movies_YYYY-MM-DD.csv
+MediaTidy_series_YYYY-MM-DD.csv
+```
 
-    Rinomina con metadati: Titolo (Anno) {tmdb-ID} [Paese, Regista]
+I log e i CSV possono contenere nomi di file e percorsi locali: non pubblicarli se contengono dati personali.
 
-    Download poster del film
+## Struttura del progetto
 
-    Spostamento o copia con gestione duplicati
+```text
+MediaTidy/
+├── media_tidy.py            # Avvio dell’applicazione
+├── config.py                 # Configurazione condivisa e QSettings
+├── localization.py           # Traduzioni italiano/inglese
+├── text_utils.py             # Sanificazione e capitalizzazione dei titoli
+├── media_operations.py       # Log, CSV, file, mount, SSH e rsync
+├── tmdb_client.py            # Client API TMDB
+├── MT_Icon.png               # Icona dell’applicazione
+├── requirements.txt          # Dipendenze Python
+├── CHANGELOG.md              # Cronologia delle versioni
+├── core/
+│   ├── movie_handler.py      # Logica film
+│   ├── series_handler.py     # Logica serie TV
+│   └── series_classifier.py  # Riconoscimento episodi, sample e clip
+├── ui/
+│   ├── main_window.py        # Finestra principale
+│   ├── movie_tab.py          # Scheda Film
+│   ├── series_tab.py         # Scheda Serie TV
+│   ├── settings_dialog.py    # Finestra Opzioni
+│   └── widgets.py            # Widget e dialoghi condivisi
+└── AppImage/
+    ├── build_appimage.sh     # Script di build locale
+    └── MediaTidy.desktop     # Desktop entry dell’AppImage
+```
 
-    Pulizia cartelle di origine
-
-- **Serie TV**
-
-    Riconoscimento automatico episodi SxxEyy
-
-    Classificazione episodi, sample, clip
-
-    Ricerca serie su TMDB
-
-    Struttura: Serie (Anno)/Season NN/Serie - SxxEyy - Titolo.ext
-
-    Download poster della serie (cartella principale)
-
-    Download poster di ogni stagione (Season NN/)
-
-    Mai decisioni automatiche su episodi non riconosciuti
-
-### Generale
-
-  - Destinazioni separate per film e serie TV
-
-  - Supporto destinazioni remote SSH/rsync
-
-  - Mount/unmount automatico condivisioni
-
-  - Log dettagliati e CSV
-
-  - Traduzioni italiano/inglese
-
-## Changelog
-**0.2.0 - 2026-09-24**
-
-Aggiunto:
-
-    Destinazioni separate per film e serie TV
-
-    Download poster delle stagioni
-
-    Download poster della serie
-
-    Tasto CANC per rimuovere file
-
-    Dialogo Opzioni con due destinazioni
-
-Corretto:
-
-    Pulizia directory sorgenti per serie TV
-
-    Gestione percorsi spostamento/copia
-
-**0.1.0 - 2026-09-24**
-
-Prima versione funzionante con:
-
-    Scheda Film (da MovieTidy)
-
-    Scheda Serie TV
-
-    Integrazione TMDB
-
-    Log separati
-
-
-## Esempi
-
-***Film:***
-
-Input: `Inception.2010.1080p.mkv`
-
-Output: `Inception (2010) {tmdb-27205}/Inception (2010).mkv`
-
-***Serie TV:***
-
-Input: `Breaking.Bad.S01E01.1080p.x265-ELiTE.mkv`
-
-Output: `Breaking Bad (2008)/Season 01/Breaking Bad - S01E01 - Pilot.mkv`
+Le directory `venv/`, `build/`, `dist/`, `tools/` e `logs/` sono generate localmente e non devono essere incluse nel repository.
 
 ## Privacy
 
-MediaTidy è un'applicazione desktop eseguita localmente sul computer dell'utente. Non include account utente, telemetria, analytics, pubblicità, tracciamento dell'utilizzo o servizi cloud propri.
+MediaTidy viene eseguito localmente sul computer dell’utente. Non richiede un account, non include pubblicità, telemetria o analytics.
 
 ### Dati elaborati localmente
 
-Durante il normale utilizzo, MediaTidy elabora localmente:
+MediaTidy può elaborare localmente:
 
-- I percorsi e i nomi dei file e delle cartelle selezionati dall'utente
-- I metadati ricavati dai nomi dei file, come titolo, anno, stagione ed episodio
-- Le impostazioni dell'applicazione, inclusi percorsi di destinazione, lingua, preferenze di rinomina e modalità copia/spostamento
-- I log delle operazioni e i file CSV generati nella cartella `logs/`
+- Nomi e percorsi dei file e delle cartelle selezionati.
+- Metadati ricavati dai nomi dei file, come titolo, anno, stagione ed episodio.
+- Impostazioni dell’applicazione, inclusi percorsi di destinazione, lingua e preferenze di rinomina.
+- Log e CSV delle operazioni.
 
-Le impostazioni vengono salvate localmente tramite QSettings. I log rimangono sul computer dell'utente e vengono conservati per un periodo limitato configurato dal programma.
+Le preferenze, inclusa la chiave API TMDB, sono memorizzate localmente tramite QSettings.
 
-### Comunicazioni di rete
+### Connessioni di rete
 
-Quando l'utente esegue una ricerca o un test, MediaTidy invia richieste alle API di TMDB (The Movie Database) per ottenere metadati di film, serie TV, stagioni, episodi e poster.
+Quando l’utente cerca o verifica un contenuto, MediaTidy contatta le API TMDB per ottenere metadati di film, serie TV, stagioni, episodi e poster.
 
-Le richieste a TMDB possono includere:
+Le richieste possono includere:
 
-- La chiave API TMDB inserita dall'utente
-- Il titolo o la query di ricerca
-- L'anno, se disponibile
-- La lingua selezionata
-- L'identificativo TMDB del contenuto, quando già noto
-- Il numero di stagione e di episodio per le serie TV
+- Chiave API TMDB.
+- Titolo della ricerca.
+- Anno, se disponibile.
+- Lingua selezionata.
+- Identificativi TMDB.
+- Numero di stagione ed episodio.
 
-I poster vengono scaricati dal servizio immagini di TMDB solo quando la relativa funzione viene utilizzata.
+I file video dell’utente non vengono caricati su TMDB.
 
-MediaTidy non invia a TMDB i file video dell'utente. In generale, i percorsi completi locali dei file non vengono inviati come parametri alle API TMDB.
+Se viene configurata una destinazione remota, MediaTidy usa SSH e rsync per trasferire file e poster verso il server scelto dall’utente. La sicurezza e la privacy del server remoto sono responsabilità dell’utente.
 
 ### Chiave API TMDB
 
-La chiave API TMDB viene inserita dall'utente nelle Opzioni e viene utilizzata solo per autenticare le richieste verso TMDB.
+La chiave API TMDB viene usata esclusivamente per autenticare le richieste a TMDB. Il programma tenta di mascherarla nei messaggi di errore, nei log e nei CSV.
 
-Il programma tenta di nascondere la chiave API nei messaggi di errore, nei log e nei file CSV. L'utente non deve comunque inserire la propria chiave API in file da pubblicare, repository GitHub, screenshot o segnalazioni di bug.
+Non pubblicare mai la chiave API in repository, screenshot, log o segnalazioni di bug.
 
-### Destinazioni remote
+## Licenza
 
-Se l'utente configura una destinazione remota, MediaTidy utilizza SSH e rsync per trasferire i file verso l'host indicato. In questo caso, dati quali file video, nomi, percorsi di destinazione e poster vengono trasmessi al server remoto scelto dall'utente.
+Da definire.
 
-La configurazione, la sicurezza e la privacy del server remoto sono responsabilità dell'utente.
+## Crediti
 
-### Controllo dell'utente
+Programma realizzato da Michele *Shuren* Bancheri, con l'ausilio di Claude.ai per la struttura base e Perplexity.ai per tutto il resto
 
-L'utente mantiene il controllo delle operazioni sui file:
+MediaTidy usa le API e le immagini di [TMDB](https://www.themoviedb.org/).
 
-- Può scegliere tra copia e spostamento
-- Può verificare i risultati prima dell'esecuzione
-- Può correggere manualmente titoli, identificativi TMDB, stagioni ed episodi
-- Può scegliere come gestire i duplicati
-- Può scegliere se rimuovere le cartelle sorgenti dopo lo spostamento
-- Può eliminare manualmente impostazioni e log locali
-
-### Servizi di terze parti
-
-I metadati e le immagini sono forniti da TMDB. L'utilizzo di tali servizi è soggetto ai termini e all'informativa sulla privacy di TMDB.
-
-MediaTidy non è approvato, certificato o ufficialmente associato a TMDB.
-
-## Autore
-
-Michele *Shuren* Bancheri
-
-### Licenza
-
-MIT License
+Questo prodotto usa le API TMDB ma non è approvato né certificato da TMDB.

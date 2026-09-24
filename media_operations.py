@@ -23,9 +23,16 @@ from config import CONFIG
 VIDEO_EXT = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".wmv", ".mpg", ".mpeg", ".ts"}
 COPY_CHUNK = 4 * 1024 * 1024
 
-LOG_DIR = Path(__file__).resolve().parent / "logs"
 LOG_RETENTION_DAYS = 10
 
+def get_log_dir():
+    """Restituisce la cartella dei log configurata dall'utente."""
+    configured_path = (CONFIG.get("logs_dir") or "").strip()
+
+    if configured_path:
+        return Path(configured_path).expanduser()
+
+    return Path.home() / ".local" / "share" / "MediaTidy" / "logs"
 
 def redact(text):
     """Nasconde la chiave API TMDB in qualsiasi testo destinato a UI, log o CSV."""
@@ -35,29 +42,38 @@ def redact(text):
 
 
 def _daily_log_path():
-    return LOG_DIR / f"MediaTidy_{date.today().isoformat()}.log"
+    return get_log_dir() / f"MediaTidy_{date.today().isoformat()}.log"
 
 
 def log_event(level, message):
-    """Scrive nel log giornaliero (condiviso film+serie) senza mai interrompere il programma."""
+    """Scrive nel log giornaliero senza interrompere il programma."""
     try:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_dir = get_log_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+
         stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S%z")
-        with _daily_log_path().open("a", encoding="utf-8") as f:
-            f.write(f"[{stamp}] {level.upper()} - {redact(message)}\n")
+        with _daily_log_path().open("a", encoding="utf-8") as file:
+            file.write(f"[{stamp}] {level.upper()} - {redact(message)}\n")
     except Exception:
         pass
 
 
 def cleanup_old_logs():
-    """Conserva i log/CSV degli ultimi 10 giorni, includendo la giornata corrente."""
+    """Conserva log e CSV degli ultimi 10 giorni, compreso oggi."""
     try:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_dir = get_log_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+
         cutoff = date.today() - timedelta(days=LOG_RETENTION_DAYS - 1)
-        for path in LOG_DIR.iterdir():
-            match = re.fullmatch(r"MediaTidy_(?:movies_|series_)?(\d{4}-\d{2}-\d{2})\.(?:log|csv)", path.name)
+
+        for path in log_dir.iterdir():
+            match = re.fullmatch(
+                r"MediaTidy_(?:movies_|series_)?(\d{4}-\d{2}-\d{2})\.(?:log|csv)",
+                path.name
+            )
             if not match:
                 continue
+
             try:
                 if date.fromisoformat(match.group(1)) < cutoff:
                     path.unlink()
@@ -68,18 +84,24 @@ def cleanup_old_logs():
 
 
 def log_csv_row(kind, header, values):
-    """kind: 'movies' o 'series' -> CSV separato per tipo nella stessa cartella logs/."""
+    """Registra una riga CSV in un file giornaliero per film o serie."""
     try:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
-        csv_path = LOG_DIR / f"MediaTidy_{kind}_{date.today().isoformat()}.csv"
+        log_dir = get_log_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        csv_path = log_dir / f"MediaTidy_{kind}_{date.today().isoformat()}.csv"
         new_file = not csv_path.exists() or csv_path.stat().st_size == 0
-        with csv_path.open("a", encoding="utf-8-sig", newline="") as f:
-            writer = csv.writer(f)
+
+        with csv_path.open("a", encoding="utf-8-sig", newline="") as file:
+            writer = csv.writer(file)
+
             if new_file:
                 writer.writerow(header)
+
             writer.writerow(values)
-    except Exception as e:
-        log_event("ERROR", f"Impossibile aggiornare il CSV {kind}: {e}")
+
+    except Exception as error:
+        log_event("ERROR", f"Impossibile aggiornare il CSV {kind}: {error}")
 
 
 def is_remote(dest):
