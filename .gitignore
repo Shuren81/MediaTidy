@@ -1,0 +1,31 @@
+# Ambiente virtuale Python
+venv/
+.venv/
+
+# Cache e file compilati Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Configurazioni locali e segreti
+.env
+.env.*
+*.key
+*.pem
+
+# Log generati dall'applicazione
+logs/
+*.log
+*.csv
+
+# File temporanei di sistema/editor
+*.part
+*~
+*.swp
+*.swo
+.directory
+.DS_Store
+Thumbs.db
+__pycache__/
+# Impostazioni locali di Geany
+.geany/

@@ -1,0 +1,3 @@
+qtpy
+PyQt5
+requests
