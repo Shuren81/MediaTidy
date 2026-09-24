@@ -1,11 +1,10 @@
-#MediaTidy
+# MediaTidy
 
 Rinomina e organizza film e serie TV usando i metadati di TMDB, con GUI a due schede: Film e Serie TV.
-Versione
 
-0.2.0 - Settembre 2026
+### Versione 0.2.0 - Settembre 2026
 
-###Struttura del progetto
+### Struttura del progetto
 
 
 ```
@@ -29,7 +28,7 @@ MediaTidy/
 └── logs/ # log operazioni
 ```
 
-##Avvio
+## Avvio
 
 Crea ambiente virtuale (consigliato):
 
@@ -38,7 +37,7 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-###Installa dipendenze:
+### Installa dipendenze:
 
 ```bash
 pip install -r requirements.txt
@@ -50,7 +49,7 @@ pip install -r requirements.txt
 python media_tidy.py
 ```
 
-##Configurazione
+## Configurazione
 
 **Al primo avvio:**
 
@@ -60,13 +59,13 @@ python media_tidy.py
 
    - Imposta Destinazione Film
 
-  -  Imposta Destinazione Serie TV
+   - Imposta Destinazione Serie TV
 
    - Scegli lingua TMDB
 
    - Clicca OK
 
-##Funzionalità
+## Funzionalità
 - **Film**
 
     Riconoscimento automatico titolo e anno dal nome file
@@ -97,9 +96,9 @@ python media_tidy.py
 
     Mai decisioni automatiche su episodi non riconosciuti
 
-###Generale
+### Generale
 
-   - Destinazioni separate per film e serie TV
+  - Destinazioni separate per film e serie TV
 
   - Supporto destinazioni remote SSH/rsync
 
@@ -109,7 +108,7 @@ python media_tidy.py
 
   - Traduzioni italiano/inglese
 
-##Changelog
+## Changelog
 **0.2.0 - 2026-09-24**
 
 Aggiunto:
@@ -143,10 +142,7 @@ Prima versione funzionante con:
     Log separati
 
 
-
-
-
-##Esempi
+## Esempi
 
 ***Film:***
 
@@ -160,10 +156,71 @@ Input: `Breaking.Bad.S01E01.1080p.x265-ELiTE.mkv`
 
 Output: `Breaking Bad (2008)/Season 01/Breaking Bad - S01E01 - Pilot.mkv`
 
-##Autore
+## Privacy
+
+MediaTidy è un'applicazione desktop eseguita localmente sul computer dell'utente. Non include account utente, telemetria, analytics, pubblicità, tracciamento dell'utilizzo o servizi cloud propri.
+
+### Dati elaborati localmente
+
+Durante il normale utilizzo, MediaTidy elabora localmente:
+
+- I percorsi e i nomi dei file e delle cartelle selezionati dall'utente
+- I metadati ricavati dai nomi dei file, come titolo, anno, stagione ed episodio
+- Le impostazioni dell'applicazione, inclusi percorsi di destinazione, lingua, preferenze di rinomina e modalità copia/spostamento
+- I log delle operazioni e i file CSV generati nella cartella `logs/`
+
+Le impostazioni vengono salvate localmente tramite QSettings. I log rimangono sul computer dell'utente e vengono conservati per un periodo limitato configurato dal programma.
+
+### Comunicazioni di rete
+
+Quando l'utente esegue una ricerca o un test, MediaTidy invia richieste alle API di TMDB (The Movie Database) per ottenere metadati di film, serie TV, stagioni, episodi e poster.
+
+Le richieste a TMDB possono includere:
+
+- La chiave API TMDB inserita dall'utente
+- Il titolo o la query di ricerca
+- L'anno, se disponibile
+- La lingua selezionata
+- L'identificativo TMDB del contenuto, quando già noto
+- Il numero di stagione e di episodio per le serie TV
+
+I poster vengono scaricati dal servizio immagini di TMDB solo quando la relativa funzione viene utilizzata.
+
+MediaTidy non invia a TMDB i file video dell'utente. In generale, i percorsi completi locali dei file non vengono inviati come parametri alle API TMDB.
+
+### Chiave API TMDB
+
+La chiave API TMDB viene inserita dall'utente nelle Opzioni e viene utilizzata solo per autenticare le richieste verso TMDB.
+
+Il programma tenta di nascondere la chiave API nei messaggi di errore, nei log e nei file CSV. L'utente non deve comunque inserire la propria chiave API in file da pubblicare, repository GitHub, screenshot o segnalazioni di bug.
+
+### Destinazioni remote
+
+Se l'utente configura una destinazione remota, MediaTidy utilizza SSH e rsync per trasferire i file verso l'host indicato. In questo caso, dati quali file video, nomi, percorsi di destinazione e poster vengono trasmessi al server remoto scelto dall'utente.
+
+La configurazione, la sicurezza e la privacy del server remoto sono responsabilità dell'utente.
+
+### Controllo dell'utente
+
+L'utente mantiene il controllo delle operazioni sui file:
+
+- Può scegliere tra copia e spostamento
+- Può verificare i risultati prima dell'esecuzione
+- Può correggere manualmente titoli, identificativi TMDB, stagioni ed episodi
+- Può scegliere come gestire i duplicati
+- Può scegliere se rimuovere le cartelle sorgenti dopo lo spostamento
+- Può eliminare manualmente impostazioni e log locali
+
+### Servizi di terze parti
+
+I metadati e le immagini sono forniti da TMDB. L'utilizzo di tali servizi è soggetto ai termini e all'informativa sulla privacy di TMDB.
+
+MediaTidy non è approvato, certificato o ufficialmente associato a TMDB.
+
+## Autore
 
 Michele *Shuren* Bancheri
 
-###Licenza
+### Licenza
 
 MIT License
