@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
 ui/main_window.py - Finestra principale di MediaTidy: barra in alto (Opzioni,
-Formato Nomi a sinistra — Log, Crediti & Privacy a destra), un'area di drop comune
-che smista automaticamente Film/Serie TV, e il QTabWidget con le due schede.
+Formato Nomi a sinistra — Log, Crediti & Privacy a destra), un'etichetta col nome
+del programma che segnala lo stato del trascinamento, e il QTabWidget con le due
+schede. TUTTA la finestra è area di rilascio: le tabelle mantengono la precedenza
+quando il drop avviene sopra di loro (comportamento nativo di Qt), il resto della
+finestra passa dal triage automatico Film/Serie TV (core/media_classifier.py).
 """
-from config import CONFIG, load_config, save_config
+from config import CONFIG, VERSION, load_config, save_config
 from localization import tr
 from media_operations import get_log_dir
 from core.media_classifier import classify_paths, to_series_item
@@ -12,14 +15,22 @@ from ui.movie_tab import MovieTab
 from ui.series_tab import SeriesTab
 from ui.settings_dialog import SettingsDialog
 from ui.format_dialog import FormatDialog
-from ui.widgets import CreditsPrivacyDialog, DropZone
+from ui.widgets import ALIGN_CENTER, CreditsPrivacyDialog
 
 from qtpy.QtCore import QUrl
 from qtpy.QtGui import QDesktopServices
 from qtpy.QtWidgets import (
-    QDialog, QHBoxLayout, QMainWindow, QMessageBox, QPushButton, QTabWidget,
-    QVBoxLayout, QWidget,
+    QDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
+    QTabWidget, QVBoxLayout, QWidget,
 )
+
+# Colori dell'etichetta col nome del programma, per stato del trascinamento.
+TITLE_COLORS = {
+    "blue": "#2b7de9",    # a riposo / all'avvio
+    "yellow": "#c99a00",  # si sta trascinando su un'area neutra della finestra
+    "green": "#1a9c1a",   # ultimo rilascio riuscito (fisso finché non si trascina di nuovo)
+    "red": "#c62828",     # ultimo rilascio senza nulla di utile (fisso finché non si trascina di nuovo)
+}
 
 
 class MainWindow(QMainWindow):
@@ -27,6 +38,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         load_config()
         self.resize(1450, 780)
+        self.setAcceptDrops(True)
+        self._last_result_color = "blue"
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -55,10 +68,12 @@ class MainWindow(QMainWindow):
 
         lay.addLayout(top_bar)
 
-        # --- Area di drop comune: smista Film/Serie da sola ---
-        self.drop_zone = DropZone("add_media_drop")
-        self.drop_zone.files_dropped.connect(lambda paths: self._dispatch(paths, default_hint=None))
-        lay.addWidget(self.drop_zone)
+        # --- Etichetta col nome del programma: segnala lo stato del trascinamento ---
+        self.title_label = QLabel(f"MediaTidy v{VERSION} by Shuren")
+        self.title_label.setAlignment(ALIGN_CENTER)
+        self.title_label.setMinimumHeight(56)
+        self._set_title_color("blue")
+        lay.addWidget(self.title_label)
 
         self.tabs = QTabWidget()
         self.movie_tab = MovieTab()
@@ -69,10 +84,14 @@ class MainWindow(QMainWindow):
 
         # Il drag&drop sulle tabelle passa anch'esso dal triage: ogni tabella resta
         # ricettiva a tutto e si "autocorregge" spostando nell'altra scheda ciò che
-        # non è suo (vedi _dispatch). Il default_hint privilegia il tipo della scheda
-        # su cui l'utente ha trascinato, solo per i casi genuinamente ambigui.
-        self.movie_tab.table.files_dropped.connect(lambda paths: self._dispatch(paths, default_hint="movie"))
-        self.series_tab.table.files_dropped.connect(lambda paths: self._dispatch(paths, default_hint="series"))
+        # non è suo. Il default_hint privilegia il tipo della scheda su cui l'utente
+        # ha trascinato, solo per i casi genuinamente ambigui. Le tabelle mostrano il
+        # proprio lampeggio verde/rosso (vedi _on_dropped_movies/_on_dropped_series);
+        # l'etichetta del nome programma resta riservata ai drop sull'area neutra.
+        self.movie_tab.table.files_dropped.connect(self._on_dropped_movies)
+        self.series_tab.table.files_dropped.connect(self._on_dropped_series)
+        self.movie_tab.table.drag_state_changed.connect(self._on_table_drag_state)
+        self.series_tab.table.drag_state_changed.connect(self._on_table_drag_state)
 
         self.tabs.addTab(self.movie_tab, "")
         self.tabs.addTab(self.series_tab, "")
@@ -86,7 +105,6 @@ class MainWindow(QMainWindow):
         self.btn_format.setText(tr("format_btn"))
         self.btn_log.setText(tr("log_btn"))
         self.btn_credits.setText(tr("credits_btn"))
-        self.drop_zone.retranslate()
 
         self.tabs.setTabText(0, tr("tab_movies"))
         self.tabs.setTabText(1, tr("tab_series"))
@@ -96,16 +114,85 @@ class MainWindow(QMainWindow):
         self.series_tab.retranslate_ui()
 
     # ------------------------------------------------------------------ #
+    #  Etichetta col nome del programma: stato del trascinamento
+    # ------------------------------------------------------------------ #
+    def _set_title_color(self, state):
+        color = TITLE_COLORS.get(state, TITLE_COLORS["blue"])
+        self.title_label.setStyleSheet(
+            f"QLabel {{ color: {color}; font-weight: bold; font-size: 26px; "
+            f"padding: 10px 0px; border-bottom: 2px solid {color}; }}"
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Tutta la finestra è area di rilascio (le tabelle hanno la precedenza:
+    #  Qt consegna gli eventi di drag&drop al widget più interno sotto il
+    #  cursore che li accetta, quindi sopra una tabella è lei a gestirli).
+    # ------------------------------------------------------------------ #
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+            self._set_title_color("yellow")
+        else:
+            e.ignore()
+
+    def dragMoveEvent(self, e):
+        self.dragEnterEvent(e)
+
+    def dragLeaveEvent(self, e):
+        self._set_title_color(self._last_result_color)
+        super().dragLeaveEvent(e)
+        
+    def _on_table_drag_state(self, active):
+        """Le tabelle intercettano il drag prima della finestra: questo tiene
+        comunque gialla l'etichetta anche quando il trascinamento è sopra di loro."""
+        if active:
+            self._set_title_color("yellow")
+        else:
+            self._set_title_color(self._last_result_color)    
+
+    def dropEvent(self, e):
+        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+        e.acceptProposedAction()
+        if not paths:
+            self._last_result_color = "red"
+            self._set_title_color("red")
+            return
+        n_movies, n_series = self._dispatch(paths, default_hint=None)
+        self._last_result_color = "green" if (n_movies or n_series) else "red"
+        self._set_title_color(self._last_result_color)
+
+    # ------------------------------------------------------------------ #
     #  Triage automatico Film / Serie TV
     # ------------------------------------------------------------------ #
+    def _on_dropped_movies(self, paths):
+        n_movies, n_series = self._dispatch(paths, default_hint="movie")
+        if n_movies or n_series:
+            self.movie_tab.table.flash_success()
+            self._last_result_color = "green"
+        else:
+            self.movie_tab.table.flash_failure()
+            self._last_result_color = "red"
+        self._set_title_color(self._last_result_color)
+
+    def _on_dropped_series(self, paths):
+        n_movies, n_series = self._dispatch(paths, default_hint="series")
+        if n_movies or n_series:
+            self.series_tab.table.flash_success()
+            self._last_result_color = "green"
+        else:
+            self.series_tab.table.flash_failure()
+            self._last_result_color = "red"
+        self._set_title_color(self._last_result_color)
+
     def _dispatch(self, paths, default_hint):
         """Classifica i percorsi trascinati (senza rete) e li smista nella scheda
         giusta; per i casi ambiguous chiede all'utente, con un default suggerito
-        dalla scheda/zona su cui è avvenuto il drop."""
+        dalla scheda/zona su cui è avvenuto il drop. Ritorna (n_movies, n_series)
+        aggiunti, così il chiamante decide il feedback visivo appropriato."""
         classified = classify_paths(paths)
         if not classified:
             self.statusBar().showMessage(tr("no_video_found"))
-            return
+            return 0, 0
 
         movie_known = self.movie_tab.known_paths()
         series_known = self.series_tab.known_paths()
@@ -134,6 +221,7 @@ class MainWindow(QMainWindow):
         self.series_tab.update_buttons()
         if n_movies or n_series:
             self.statusBar().showMessage(tr("triage_result", movies=n_movies, series=n_series))
+        return n_movies, n_series
 
     def _ask_ambiguous(self, cf, default_hint):
         box = QMessageBox(self)
@@ -163,10 +251,10 @@ class MainWindow(QMainWindow):
 
     def open_format(self):
         before = (
-            CONFIG["dest_movies"], CONFIG["action_movies"], CONFIG["movie_title_mode"],
+            CONFIG["dest_movies"], CONFIG["movie_title_mode"],
             CONFIG["movie_include_tmdb_id"], CONFIG["movie_include_country"],
             CONFIG["movie_include_director"], CONFIG["movie_download_poster"],
-            CONFIG["dest_series"], CONFIG["action_series"], CONFIG["series_title_mode"],
+            CONFIG["dest_series"], CONFIG["series_title_mode"],
             CONFIG["series_include_tmdb_id"], CONFIG["series_include_episode_title"],
             CONFIG["series_download_show_poster"], CONFIG["series_download_season_poster"],
         )
@@ -174,10 +262,10 @@ class MainWindow(QMainWindow):
         if dlg.exec_() == QDialog.Accepted:
             save_config()
             after = (
-                CONFIG["dest_movies"], CONFIG["action_movies"], CONFIG["movie_title_mode"],
+                CONFIG["dest_movies"], CONFIG["movie_title_mode"],
                 CONFIG["movie_include_tmdb_id"], CONFIG["movie_include_country"],
                 CONFIG["movie_include_director"], CONFIG["movie_download_poster"],
-                CONFIG["dest_series"], CONFIG["action_series"], CONFIG["series_title_mode"],
+                CONFIG["dest_series"], CONFIG["series_title_mode"],
                 CONFIG["series_include_tmdb_id"], CONFIG["series_include_episode_title"],
                 CONFIG["series_download_show_poster"], CONFIG["series_download_season_poster"],
             )

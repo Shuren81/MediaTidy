@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-ui/format_dialog.py - Dialogo "Formato Nomi": destinazione, azione Sposta/Copia,
-modalità titolo e toggle di formato — indipendenti per Film e per Serie TV.
+ui/format_dialog.py - Dialogo "Formato Nomi": destinazione, modalità titolo e
+toggle di formato — indipendenti per Film e per Serie TV. L'azione Sposta/Copia
+non è più qui: resta solo il radio button di ciascuna scheda (unico punto dove
+si imposta, più comodo da raggiungere durante il lavoro quotidiano).
 """
 from config import CONFIG
 from localization import tr
 
 from qtpy.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QTabWidget,
-    QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
 TITLE_MODE_KEYS = ("original", "localized", "orig_loc", "loc_orig")
@@ -17,10 +18,10 @@ TITLE_MODE_LABELS = ("title_mode_original", "title_mode_localized", "title_mode_
 
 
 class _FormatTab(QWidget):
-    """Una scheda (Film o Serie) del dialogo Formato Nomi: stessi campi comuni
-    (destinazione, azione, titolo) + una lista di checkbox specifici passata da fuori."""
+    """Una scheda (Film o Serie) del dialogo Formato Nomi: destinazione e titolo
+    in comune + una lista di checkbox specifici passata da fuori."""
 
-    def __init__(self, dest_label, dest_value, action_value, checkbox_specs, parent=None):
+    def __init__(self, dest_label, dest_value, checkbox_specs, parent=None):
         super().__init__(parent)
         layout = QFormLayout(self)
 
@@ -31,14 +32,6 @@ class _FormatTab(QWidget):
         dest_row.addWidget(self.dest)
         dest_row.addWidget(browse_btn)
         layout.addRow(dest_label, dest_row)
-
-        self.radio_move = QRadioButton(tr("move"))
-        self.radio_copy = QRadioButton(tr("copy"))
-        (self.radio_move if action_value == "move" else self.radio_copy).setChecked(True)
-        action_row = QHBoxLayout()
-        action_row.addWidget(self.radio_move)
-        action_row.addWidget(self.radio_copy)
-        layout.addRow(tr("file_action"), action_row)
 
         self.title_combo = QComboBox()
         for key, label_key in zip(TITLE_MODE_KEYS, TITLE_MODE_LABELS):
@@ -70,9 +63,6 @@ class _FormatTab(QWidget):
     def title_mode(self):
         return self.title_combo.currentData()
 
-    def action(self):
-        return "move" if self.radio_move.isChecked() else "copy"
-
     def checkbox(self, config_key):
         return self._checkboxes[config_key].isChecked()
 
@@ -81,13 +71,13 @@ class FormatDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr("format_title"))
-        self.resize(560, 420)
+        self.resize(560, 380)
 
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
 
         self.movie_tab = _FormatTab(
-            tr("dest_movies_label"), CONFIG["dest_movies"], CONFIG["action_movies"],
+            tr("dest_movies_label"), CONFIG["dest_movies"],
             [
                 ("movie_include_tmdb_id", "movie_include_tmdb_id", "movie_tmdb_id_note"),
                 ("movie_include_country", "movie_include_country", None),
@@ -99,7 +89,7 @@ class FormatDialog(QDialog):
         tabs.addTab(self.movie_tab, tr("format_tab_movies"))
 
         self.series_tab = _FormatTab(
-            tr("dest_series_label"), CONFIG["dest_series"], CONFIG["action_series"],
+            tr("dest_series_label"), CONFIG["dest_series"],
             [
                 ("series_include_tmdb_id", "series_include_tmdb_id", "series_tmdb_id_note"),
                 ("series_include_episode_title", "series_include_episode_title", None),
@@ -119,7 +109,6 @@ class FormatDialog(QDialog):
 
     def accept(self):
         CONFIG["dest_movies"] = self.movie_tab.dest.text().strip()
-        CONFIG["action_movies"] = self.movie_tab.action()
         CONFIG["movie_title_mode"] = self.movie_tab.title_mode()
         CONFIG["movie_include_tmdb_id"] = self.movie_tab.checkbox("movie_include_tmdb_id")
         CONFIG["movie_include_country"] = self.movie_tab.checkbox("movie_include_country")
@@ -127,7 +116,6 @@ class FormatDialog(QDialog):
         CONFIG["movie_download_poster"] = self.movie_tab.checkbox("movie_download_poster")
 
         CONFIG["dest_series"] = self.series_tab.dest.text().strip()
-        CONFIG["action_series"] = self.series_tab.action()
         CONFIG["series_title_mode"] = self.series_tab.title_mode()
         CONFIG["series_include_tmdb_id"] = self.series_tab.checkbox("series_include_tmdb_id")
         CONFIG["series_include_episode_title"] = self.series_tab.checkbox("series_include_episode_title")

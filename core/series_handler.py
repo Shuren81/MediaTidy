@@ -492,6 +492,15 @@ class SeriesWorker(QThread):
 
         if self.clean_parent and self.action == "move":
             self._cleanup_dirs.setdefault(src_parent, i)
+            # Registra anche la cartella "genitore" che hai trascinato tu (es. la
+            # cartella della serie, sopra le sottocartelle Season NN), non solo la
+            # cartella immediata del file: altrimenti resta fuori dalla pulizia,
+            # senza calcolo né prompt, anche se svuotata di tutte le sue stagioni.
+            release_dir = it.get("release_dir")
+            if release_dir:
+                release_dir = release_dir.resolve()
+                if release_dir != src_parent:
+                    self._cleanup_dirs.setdefault(release_dir, i)
         # Scarica poster della serie nella cartella principale (una volta sola).
         # Presuppone folder = "{cartella serie}/Season NN": con un override manuale
         # completo la struttura potrebbe non rispettarla, quindi si salta.

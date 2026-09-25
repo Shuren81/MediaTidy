@@ -175,8 +175,6 @@ STRINGS = {
         "series_add_release": "Aggiungi release…",
 
         # --- Triage automatico Film/Serie ---
-        "add_media_drop": "Trascina qui film o serie TV: il programma li smista da solo",
-        "add_media_btn": "Aggiungi media…",
         "ambiguous_title": "Film o Serie TV?",
         "ambiguous_msg": "Non riesco a stabilire con certezza se «{name}» sia un film o un episodio di una serie.",
         "ambiguous_btn_movie": "È un film",
@@ -349,8 +347,6 @@ STRINGS = {
         "series_add_release": "Add release…",
 
         # --- Automatic Movie/Series triage ---
-        "add_media_drop": "Drag movies or TV series here: the program sorts them for you",
-        "add_media_btn": "Add media…",
         "ambiguous_title": "Movie or TV Series?",
         "ambiguous_msg": "I can't reliably tell whether «{name}» is a movie or a TV episode.",
         "ambiguous_btn_movie": "It's a movie",

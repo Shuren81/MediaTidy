@@ -9,12 +9,18 @@ sono in moduli propri.
 from config import VERSION
 from localization import tr
 
-from qtpy.QtCore import Qt, Signal
+from qtpy.QtCore import Qt, QTimer, Signal
 from qtpy.QtGui import QColor, QKeySequence, QPainter
 from qtpy.QtWidgets import (
     QCheckBox, QDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTabWidget, QTextBrowser, QVBoxLayout, QWidget, QAbstractItemView,
 )
+
+# Colori del feedback di trascinamento, condivisi da tabelle e finestra principale.
+DRAG_ACTIVE_COLOR = QColor(230, 180, 0)   # giallo: si sta trascinando sopra l'area
+DRAG_SUCCESS_COLOR = QColor(0, 150, 0)    # verde: il rilascio ha importato qualcosa
+DRAG_FAILURE_COLOR = QColor(200, 0, 0)    # rosso: il rilascio non ha importato nulla
+DRAG_FLASH_MS = 500  # durata del lampeggio verde/rosso sulle tabelle
 
 # Compatibilità per costanti Qt tra PyQt5, PyQt6 e PySide
 try:
@@ -44,10 +50,16 @@ class ToggleableListWidget(QTableWidget):
     Generica: la scheda Film e la scheda Serie TV la usano con colonne diverse."""
     files_dropped = Signal(list)
     delete_requested = Signal()  # Canc/Backspace: la tab decide come rimuovere (items + righe insieme)
+    drag_state_changed = Signal(bool)  # True=trascinamento in corso sopra la tabella, False=uscito/rilasciato
 
     def __init__(self, headers, stretch_cols=(0, 1, 2)):
         super().__init__(0, len(headers))
         self._headers_keys = headers
+        self._drag_active = False
+        self._flash_color = None
+        self._flash_timer = QTimer(self)
+        self._flash_timer.setSingleShot(True)
+        self._flash_timer.timeout.connect(self._clear_flash)
         self.setTextElideMode(ELIDE_RIGHT)
         self.setAcceptDrops(True)
         self.setDragDropMode(DROP_ONLY)
@@ -56,7 +68,7 @@ class ToggleableListWidget(QTableWidget):
         self.setWordWrap(False)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        self.setStyleSheet("""
+        self._base_style = """
             QHeaderView::section {
                 font-weight: bold;
                 font-size: 13px;
@@ -69,7 +81,8 @@ class ToggleableListWidget(QTableWidget):
                 font-size: 13px;
                 padding: 4px;
             }
-        """)
+        """
+        self._apply_border()
 
         h = self.horizontalHeader()
         for c in range(len(headers)):
@@ -81,16 +94,48 @@ class ToggleableListWidget(QTableWidget):
         self.setHorizontalHeaderLabels([tr(k) for k in self._headers_keys])
 
     def dragEnterEvent(self, e):
-        e.acceptProposedAction() if e.mimeData().hasUrls() else e.ignore()
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+            self._drag_active = True
+            self._apply_border()
+        else:
+            e.ignore()
 
     def dragMoveEvent(self, e):
         self.dragEnterEvent(e)
 
+    def dragLeaveEvent(self, e):
+        self._drag_active = False
+        self._apply_border()
+        super().dragLeaveEvent(e)
+
     def dropEvent(self, e):
-        from qtpy.QtWidgets import QApplication
         paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
         e.acceptProposedAction()
-        self.files_dropped.emit(paths)
+        self._drag_active = False
+        self._apply_border()
+        if paths:
+            self.files_dropped.emit(paths)
+
+    def flash_success(self):
+        self._start_flash(DRAG_SUCCESS_COLOR)
+
+    def flash_failure(self):
+        self._start_flash(DRAG_FAILURE_COLOR)
+
+    def _start_flash(self, color):
+        self._flash_color = color
+        self._apply_border()
+        self._flash_timer.start(DRAG_FLASH_MS)
+
+    def _clear_flash(self):
+        self._flash_color = None
+        self._apply_border()
+
+    def _apply_border(self):
+        color = DRAG_ACTIVE_COLOR if self._drag_active else self._flash_color
+        border_css = f"QTableWidget {{ border: 3px solid {color.name()}; }}" if color else ""
+        self.setStyleSheet(self._base_style + border_css)
 
     def mousePressEvent(self, event):
         from qtpy.QtWidgets import QApplication
@@ -122,14 +167,15 @@ class ToggleableListWidget(QTableWidget):
 
     def paintEvent(self, e):
         super().paintEvent(e)
-        if self.rowCount() == 0:
+        if self.rowCount() == 0 and not self._drag_active and not self._flash_color:
             p = QPainter(self.viewport())
             p.setPen(QColor(128, 128, 128))
             f = p.font()
             f.setBold(False)
             p.setFont(f)
             p.drawText(self.viewport().rect(), ALIGN_CENTER, tr("drag_drop"))
-            
+            p.end()
+
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             # NON tocca le righe direttamente: emette solo il segnale, così la tab
@@ -144,43 +190,6 @@ class ToggleableListWidget(QTableWidget):
             event.accept()
             return
         super().keyPressEvent(event)
-
-
-class DropZone(QLabel):
-    """Area di drop comune sopra le due schede: accetta film e serie insieme e lascia
-    che MainWindow li smisti con il classificatore automatico (core/media_classifier.py)."""
-    files_dropped = Signal(list)
-
-    def __init__(self, text_key="add_media_drop", parent=None):
-        super().__init__(parent)
-        self._text_key = text_key
-        self.setAcceptDrops(True)
-        self.setAlignment(ALIGN_CENTER)
-        self.setMinimumHeight(44)
-        self.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #b0b0b0;
-                border-radius: 6px;
-                color: #808080;
-                padding: 8px;
-            }
-        """)
-        self.retranslate()
-
-    def retranslate(self):
-        self.setText(tr(self._text_key))
-
-    def dragEnterEvent(self, e):
-        e.acceptProposedAction() if e.mimeData().hasUrls() else e.ignore()
-
-    def dragMoveEvent(self, e):
-        self.dragEnterEvent(e)
-
-    def dropEvent(self, e):
-        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
-        e.acceptProposedAction()
-        if paths:
-            self.files_dropped.emit(paths)
 
 
 class DuplicateDialog(QDialog):
