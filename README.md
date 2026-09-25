@@ -64,18 +64,24 @@ python3 media_tidy.py
 Alla prima esecuzione, apri **Opzioni** e configura almeno:
 
 - La tua chiave API TMDB.
-- La cartella di destinazione per i film.
-- La cartella di destinazione per le serie TV.
 - La lingua usata per le ricerche TMDB.
-- La modalità operativa: copia o spostamento.
 
-Facoltativamente, puoi configurare:
+Facoltativamente, sempre da **Opzioni**:
 
-- Regola di capitalizzazione dei titoli.
+- Regola di capitalizzazione dei titoli (condivisa tra Film e Serie TV).
 - Smontaggio automatico del disco dopo l’elaborazione.
 - Rimozione delle cartelle sorgenti rimaste vuote.
 - Lingua dell’interfaccia.
 - Cartella personalizzata per log e CSV.
+
+Da **Formato Nomi**, separatamente per Film e per Serie TV:
+
+- La cartella di destinazione.
+- La modalità operativa: copia o spostamento.
+- La modalità titolo (solo originale, solo localizzato, o entrambi in un ordine
+  o nell’altro).
+- Cosa includere nel nome/cartella (ID TMDB, paese, regista, titolo
+  dell’episodio, download del poster).
 
 ## Log e CSV
 
@@ -113,12 +119,14 @@ MediaTidy/
 ├── core/
 │   ├── movie_handler.py      # Logica film
 │   ├── series_handler.py     # Logica serie TV
-│   └── series_classifier.py  # Riconoscimento episodi, sample e clip
+│   ├── series_classifier.py  # Riconoscimento episodi, sample e clip
+│   └── media_classifier.py   # Triage automatico Film/Serie TV (senza rete)
 ├── ui/
-│   ├── main_window.py        # Finestra principale
+│   ├── main_window.py        # Finestra principale, area di drop comune, triage
 │   ├── movie_tab.py          # Scheda Film
 │   ├── series_tab.py         # Scheda Serie TV
-│   ├── settings_dialog.py    # Finestra Opzioni
+│   ├── settings_dialog.py    # Finestra Opzioni (impostazioni globali)
+│   ├── format_dialog.py      # Finestra Formato Nomi (per scheda: Film/Serie)
 │   └── widgets.py            # Widget e dialoghi condivisi
 └── AppImage/
     ├── build_appimage.sh     # Script di build locale

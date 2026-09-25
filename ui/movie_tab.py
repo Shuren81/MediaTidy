@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-ui/movie_tab.py - Scheda "Film": tabella con drag&drop, Test/Esegui, dialogo di
-conferma TMDB, menu contestuale (modifica personalizzata, codice TMDB, lingua),
-duplicati e cartelle non vuote. Usa core/movie_handler.py per tutta la logica.
+ui/movie_tab.py - Scheda "Film": tabella con drag&drop, Test/Esegui (selezionati/
+tutti), dialogo di conferma TMDB, menu contestuale (modifica personalizzata, codice
+TMDB, lingua), duplicati e cartelle non vuote. Usa core/movie_handler.py per la logica.
 """
 from pathlib import Path
 
@@ -27,6 +27,9 @@ from qtpy.QtWidgets import (
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
     QProgressBar, QPushButton, QRadioButton, QTableWidgetItem, QVBoxLayout, QWidget,
 )
+
+# Colonne su cui il doppio click apre "Modifica personalizzata" (nome + cartella)
+CUSTOM_EDIT_COLS = (1, 2)
 
 
 class ChoiceDialog(QDialog):
@@ -109,10 +112,7 @@ class MovieTab(QWidget):
         self.top_bar.addWidget(self.lbl_action)
         self.radio_move = QRadioButton()
         self.radio_copy = QRadioButton()
-        if CONFIG.get("action", "move") == "move":
-            self.radio_move.setChecked(True)
-        else:
-            self.radio_copy.setChecked(True)
+        self._set_radio_from_config()
         self.radio_move.toggled.connect(self._update_action_mode)
         self.top_bar.addWidget(self.radio_move)
         self.top_bar.addWidget(self.radio_copy)
@@ -120,10 +120,15 @@ class MovieTab(QWidget):
         self.lay.addLayout(self.top_bar)
 
         self.table = ToggleableListWidget(MOVIE_HEADERS, stretch_cols=(0, 1, 2))
-        self.table.files_dropped.connect(self.add_paths)
+        # Il drag&drop sulla tabella passa dal triage automatico di MainWindow, non da
+        # add_paths direttamente: vedi MainWindow._dispatch. add_paths resta usato solo
+        # dai pulsanti "Aggiungi file/cartella" di QUESTA scheda (scelta esplicita).
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
         self.table.itemChanged.connect(self.on_item_changed)
+        self.table.itemDoubleClicked.connect(self.on_item_double_clicked)
+        self.table.itemSelectionChanged.connect(self.update_buttons)
+        self.table.delete_requested.connect(self.remove_selected)
         self.lay.addWidget(self.table, 1)
 
         self.progress_bar = QProgressBar()
@@ -137,20 +142,23 @@ class MovieTab(QWidget):
         self.btn_remove = QPushButton()
         self.btn_clear = QPushButton()
         self.btn_test = QPushButton()
-        self.btn_rename = QPushButton()
+        self.btn_exec_sel = QPushButton()
+        self.btn_exec_all = QPushButton()
 
         self.btn_add_files.clicked.connect(self.pick_files)
         self.btn_add_dir.clicked.connect(self.pick_dir)
         self.btn_remove.clicked.connect(self.remove_selected)
         self.btn_clear.clicked.connect(self.clear_all)
         self.btn_test.clicked.connect(lambda: self.start("test"))
-        self.btn_rename.clicked.connect(lambda: self.start("action"))
+        self.btn_exec_sel.clicked.connect(lambda: self.start("action", scope="selected"))
+        self.btn_exec_all.clicked.connect(lambda: self.start("action", scope="all"))
 
         for b in (self.btn_add_files, self.btn_add_dir, self.btn_remove, self.btn_clear):
             self.row_btns.addWidget(b)
         self.row_btns.addStretch(1)
         self.row_btns.addWidget(self.btn_test)
-        self.row_btns.addWidget(self.btn_rename)
+        self.row_btns.addWidget(self.btn_exec_sel)
+        self.row_btns.addWidget(self.btn_exec_all)
         self.lay.addLayout(self.row_btns)
 
         self.status_callback = None  # impostato da MainWindow -> statusBar().showMessage
@@ -158,6 +166,12 @@ class MovieTab(QWidget):
         self.update_buttons()
 
     # ------------------------------------------------------------------ #
+    def _set_radio_from_config(self):
+        if CONFIG.get("action_movies", "move") == "move":
+            self.radio_move.setChecked(True)
+        else:
+            self.radio_copy.setChecked(True)
+
     def retranslate_ui(self):
         self.lbl_action.setText(tr("file_action"))
         self.radio_move.setText(tr("move"))
@@ -167,25 +181,30 @@ class MovieTab(QWidget):
         self.btn_remove.setText(tr("remove_sel"))
         self.btn_clear.setText(tr("clear_all"))
         self.btn_test.setText(tr("test"))
-        self.btn_rename.setText(tr("execute"))
         self.table.update_headers()
         for i in range(len(self.items)):
             self.refresh_row(i)
+        self.update_buttons()
 
     def _show_status(self, msg):
         if self.status_callback:
             self.status_callback(msg)
 
     def _update_action_mode(self):
-        CONFIG["action"] = "move" if self.radio_move.isChecked() else "copy"
+        CONFIG["action_movies"] = "move" if self.radio_move.isChecked() else "copy"
+        self.update_buttons()
 
     def config_changed(self):
-        """Chiamato da MainWindow dopo che le Opzioni sono state salvate."""
+        """Chiamato da MainWindow dopo che Opzioni o Formato Nomi sono stati salvati."""
         for it in self.items:
             if is_ready(it) or it.get("status") == "status_already_exists":
                 set_status(it, "status_to_test")
+        self.radio_move.blockSignals(True)
+        self.radio_copy.blockSignals(True)
+        self._set_radio_from_config()
+        self.radio_move.blockSignals(False)
+        self.radio_copy.blockSignals(False)
         self.retranslate_ui()
-        self.update_buttons()
 
     # ------------------------------------------------------------------ #
     def pick_files(self):
@@ -218,25 +237,32 @@ class MovieTab(QWidget):
                 if f in known:
                     continue
                 known.add(f)
-                self.items.append({
-                    "path": f,
-                    "from_dir": from_dir,
-                    "tmdb_id": "",
-                    "folder": "",
-                    "newname": "",
-                    "status": "status_to_test",
-                    "status_detail": "",
-                    "poster_path": None,
-                    "custom_override": False,
-                    "force_overwrite": False,
-                    "lang": None,
-                })
-                self.table.insertRow(self.table.rowCount())
-                self.refresh_row(len(self.items) - 1)
+                self.add_item(f, from_dir)
                 added += 1
         if not added and paths:
             self._show_status(tr("no_video_found"))
         self.update_buttons()
+
+    def add_item(self, path, from_dir):
+        """Aggiunge un file già individuato come film (usato anche dal triage automatico)."""
+        self.items.append({
+            "path": path,
+            "from_dir": from_dir,
+            "tmdb_id": "",
+            "folder": "",
+            "newname": "",
+            "status": "status_to_test",
+            "status_detail": "",
+            "poster_path": None,
+            "custom_override": False,
+            "force_overwrite": False,
+            "lang": None,
+        })
+        self.table.insertRow(self.table.rowCount())
+        self.refresh_row(len(self.items) - 1)
+
+    def known_paths(self):
+        return {it["path"] for it in self.items}
 
     def remove_selected(self):
         if self._busy():
@@ -289,6 +315,13 @@ class MovieTab(QWidget):
         self.refresh_row(row)
         self.update_buttons()
 
+    def on_item_double_clicked(self, item):
+        row = item.row()
+        if self._busy() or not (0 <= row < len(self.items)):
+            return
+        if item.column() in CUSTOM_EDIT_COLS:
+            self._edit_custom_dialog(row)
+
     def show_context_menu(self, pos):
         if self._busy():
             return
@@ -338,7 +371,10 @@ class MovieTab(QWidget):
             self.table.removeRow(row)
             self.update_buttons()
 
-    def _edit_custom_dialog(self, row):
+    def _edit_custom_dialog(self, row, allow_reset=True):
+        """Nome/cartella personalizzati. allow_reset=False quando chiamato dalla
+        risoluzione duplicati, dove "torna automatico" non risolverebbe nulla
+        senza un nuovo Test (il nome resterebbe quello che ha causato il duplicato)."""
         it = self.items[row]
         dlg = QDialog(self)
         dlg.setWindowTitle(tr("custom_edit_title"))
@@ -349,12 +385,30 @@ class MovieTab(QWidget):
         layout.addRow(tr("new_filename"), name_in)
         layout.addRow(tr("dest_subfolder"), folder_in)
 
+        if allow_reset and it.get("custom_override"):
+            reset_row = QHBoxLayout()
+            btn_reset = QPushButton(tr("reset_auto_name"))
+            btn_reset.clicked.connect(lambda: dlg.done(2))
+            reset_row.addWidget(btn_reset)
+            reset_row.addStretch(1)
+            layout.addRow("", reset_row)
+
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(dlg.accept)
         btns.rejected.connect(dlg.reject)
         layout.addWidget(btns)
 
-        while dlg.exec_() == QDialog.Accepted:
+        while True:
+            result = dlg.exec_()
+            if result == 2:  # "Ripristina nome automatico"
+                it["custom_override"] = False
+                set_status(it, "status_to_test")
+                self.refresh_row(row)
+                self.update_buttons()
+                return True
+            if result != QDialog.Accepted:
+                return False
+
             raw_name = name_in.text().strip()
             raw_folder = folder_in.text().strip()
             folder_path = Path(raw_folder) if raw_folder else None
@@ -376,7 +430,6 @@ class MovieTab(QWidget):
             self.refresh_row(row)
             self.update_buttons()
             return True
-        return False
 
     def _edit_tmdb_dialog(self, row):
         it = self.items[row]
@@ -421,15 +474,24 @@ class MovieTab(QWidget):
     def update_buttons(self, idle=False):
         busy = not idle and self._busy()
         self.btn_test.setEnabled(not busy and bool(self.items))
-        self.btn_rename.setEnabled(not busy and any(is_ready(it) for it in self.items))
         for b in self._action_buttons():
             b.setEnabled(not busy)
 
+        selected_rows = {i.row() for i in self.table.selectedIndexes()}
+        n_ready_all = sum(1 for it in self.items if is_ready(it))
+        n_ready_sel = sum(1 for i in selected_rows if is_ready(self.items[i]))
+        action_word = tr("action_move_short") if CONFIG.get("action_movies", "move") == "move" else tr("action_copy_short")
+
+        self.btn_exec_sel.setText(f"{action_word} {tr('exec_sel_suffix', n=n_ready_sel)}")
+        self.btn_exec_sel.setEnabled(not busy and n_ready_sel > 0)
+        self.btn_exec_all.setText(f"{action_word} {tr('exec_all_suffix', n=n_ready_all)}")
+        self.btn_exec_all.setEnabled(not busy and n_ready_all > 0)
+
     def update_buttons_busy(self):
-        for b in (self.btn_test, self.btn_rename, *self._action_buttons()):
+        for b in (self.btn_test, self.btn_exec_sel, self.btn_exec_all, *self._action_buttons()):
             b.setEnabled(False)
 
-    def start(self, mode):
+    def start(self, mode, scope="selected"):
         if mode == "test" and not CONFIG["api_key"].strip():
             QMessageBox.warning(self, tr("missing_key_title"), tr("missing_key_msg"))
             return
@@ -437,11 +499,15 @@ class MovieTab(QWidget):
             QMessageBox.warning(self, tr("missing_dest_title"), tr("missing_dest_msg"))
             return
 
-        selected_rows = sorted({i.row() for i in self.table.selectedIndexes()})
-        candidates = selected_rows or range(len(self.items))
         if mode == "test":
+            selected_rows = sorted({i.row() for i in self.table.selectedIndexes()})
+            candidates = selected_rows or range(len(self.items))
             rows = [i for i in candidates if not is_done(self.items[i])]
         else:
+            if scope == "selected":
+                candidates = sorted({i.row() for i in self.table.selectedIndexes()})
+            else:
+                candidates = range(len(self.items))
             rows = [i for i in candidates if is_ready(self.items[i])]
 
         if not rows:
@@ -453,7 +519,7 @@ class MovieTab(QWidget):
 
         self.worker = MovieWorker(
             self.items, rows, mode,
-            action=CONFIG.get("action", "move"),
+            action=CONFIG.get("action_movies", "move"),
             unmount_after=CONFIG.get("unmount", True),
             clean_parent=CONFIG.get("clean_parent_dir", False),
             mounted_by_us=self.mounted_by_us,
@@ -463,6 +529,7 @@ class MovieTab(QWidget):
         self.worker.mounted.connect(self.on_mounted)
         self.worker.unmounted.connect(self.on_unmounted)
         self.worker.row_update.connect(self.refresh_row)
+        self.worker.row_update.connect(lambda _i: self.update_buttons())
         self.worker.file_progress.connect(self.progress_bar.setValue)
         self.worker.progress.connect(self.on_progress)
         self.worker.ask.connect(self.on_ask)
@@ -474,7 +541,10 @@ class MovieTab(QWidget):
         self.worker.start()
 
     def on_progress(self, current, total):
-        act_name = tr("test") if self.worker and self.worker.mode == "test" else (tr("move") if CONFIG["action"] == "move" else tr("copy"))
+        if self.worker and self.worker.mode == "test":
+            act_name = tr("test")
+        else:
+            act_name = tr("move") if CONFIG.get("action_movies", "move") == "move" else tr("copy")
         self._show_status(f"{act_name}: {current}/{total}")
 
     def on_ask(self, row, results, guessed):
@@ -488,7 +558,7 @@ class MovieTab(QWidget):
         it = self.items[row]
         dlg = DuplicateDialog(it["folder"], it["newname"], self)
         if dlg.exec_() == QDialog.Accepted:
-            if dlg.choice == "custom" and not self._edit_custom_dialog(row):
+            if dlg.choice == "custom" and not self._edit_custom_dialog(row, allow_reset=False):
                 self.worker.provide_dup_choice("skip", False)
             else:
                 self.worker.provide_dup_choice(dlg.choice, dlg.apply_to_all)
@@ -518,6 +588,7 @@ class MovieTab(QWidget):
         if self.worker and self.worker.did_unmount:
             msg += tr("unmounted_msg")
         self._show_status(msg)
+        self.update_buttons(idle=True)
 
     def on_error(self, msg):
         self.progress_bar.setVisible(False)

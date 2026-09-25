@@ -116,18 +116,34 @@ def uppercase_roman_numerals(text):
     )
 
 
-def format_title(original, localized, cap_rule):
-    """Combina titolo originale/localizzato in 'To (Tl)' (o solo 'To' se coincidono),
-    applicando capitalizzazione, numeri romani e sanificazione. Usato sia per film
+def format_title(original, localized, cap_rule, title_mode="orig_loc"):
+    """Combina titolo originale/localizzato secondo title_mode:
+      "original"  -> solo l'originale
+      "localized" -> solo il localizzato
+      "orig_loc"  -> "Originale (Localizzato)"
+      "loc_orig"  -> "Localizzato (Originale)"
+    Se uno dei due manca si usa sempre l'altro (mai un titolo vuoto), e se i due
+    titoli coincidono si mostra una sola volta anche in modalità "entrambi".
+    Applica poi capitalizzazione, numeri romani e sanificazione. Usato sia per film
     (titolo del film) sia per serie TV (nome della serie)."""
     to = (original or "").strip()
     tl = (localized or "").strip()
+    # Nessuno dei due deve mai restare vuoto se l'altro è disponibile.
     if not to:
         to = tl
-    if tl and to.casefold() != tl.casefold():
-        titolo_str = f"{to} ({tl})"
-    else:
+    if not tl:
+        tl = to
+
+    same = to.casefold() == tl.casefold()
+    if title_mode == "original":
         titolo_str = to
+    elif title_mode == "localized":
+        titolo_str = tl
+    elif title_mode == "loc_orig":
+        titolo_str = tl if same else f"{tl} ({to})"
+    else:  # "orig_loc", anche come ripiego per valori non riconosciuti
+        titolo_str = to if same else f"{to} ({tl})"
+
     titolo_str = apply_capitalization(titolo_str, cap_rule)
     titolo_str = uppercase_roman_numerals(titolo_str)
     titolo_str = capitalize_title_start(titolo_str)

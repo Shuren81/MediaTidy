@@ -145,17 +145,29 @@ def evaluate(results, title, year):
 def build_names(info, ext, cap_rule=None):
     if cap_rule is None:
         cap_rule = CONFIG.get("cap_rule", 2)
+    title_mode = CONFIG.get("movie_title_mode", "orig_loc")
 
-    titolo_str = format_title(info.get("original"), info.get("english_or_local"), cap_rule)
+    titolo_str = format_title(info.get("original"), info.get("english_or_local"), cap_rule, title_mode)
 
     year = info.get("year") or "XXXX"
-    tmdb_id = info.get("id") or "0000"
-    # Paese e regista NON passano da fix_apostrophes (O'Connor resta O'Connor).
-    country = sanitize_title(info.get("country") or "XX", fix_apos=False)
-    director = sanitize_title(info.get("director") or "Regista sconosciuto", fix_apos=False)
-
     base = f"{titolo_str} ({year})"
-    folder = f"{base} {{tmdb-{tmdb_id}}} [{country}, {director}]"
+
+    # Nota: se "movie_include_tmdb_id" è disattivato, titoli omonimi con lo stesso
+    # anno finiscono nella stessa cartella (l'ID TMDB è l'unica parte del nome che
+    # garantisce l'univocità) — scelta esplicita dell'utente da Formato Nomi.
+    extra = []
+    if CONFIG.get("movie_include_tmdb_id", True):
+        tmdb_id = info.get("id") or "0000"
+        extra.append(f"{{tmdb-{tmdb_id}}}")
+    bracket = []
+    if CONFIG.get("movie_include_country", True):
+        bracket.append(sanitize_title(info.get("country") or "XX", fix_apos=False))
+    if CONFIG.get("movie_include_director", True):
+        bracket.append(sanitize_title(info.get("director") or "Regista sconosciuto", fix_apos=False))
+    if bracket:
+        extra.append(f"[{', '.join(bracket)}]")
+
+    folder = " ".join([base, *extra]) if extra else base
     return folder, base + ext.lower()
 
 
@@ -399,7 +411,7 @@ class MovieWorker(QThread):
         it["tmdb_original"] = movie_info.get("original", "")
         it["tmdb_localized"] = movie_info.get("english_or_local", "")
         it["tmdb_year"] = movie_info.get("year", "")
-        it["poster_path"] = movie_info.get("poster_path")
+        it["poster_path"] = movie_info.get("poster_path") if CONFIG.get("movie_download_poster", True) else None
         if not it.get("custom_override"):
             folder, newname = build_names(movie_info, it["path"].suffix)
             it["folder"], it["newname"] = folder, newname

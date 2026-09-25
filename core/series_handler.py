@@ -127,10 +127,16 @@ def evaluate_tv(results, title, year):
 def build_show_folder(show_info, cap_rule=None):
     if cap_rule is None:
         cap_rule = CONFIG.get("cap_rule", 2)
-    titolo = format_title(show_info.get("original"), show_info.get("english_or_local"), cap_rule)
+    title_mode = CONFIG.get("series_title_mode", "orig_loc")
+    titolo = format_title(show_info.get("original"), show_info.get("english_or_local"), cap_rule, title_mode)
     year = show_info.get("year") or "XXXX"
-    tmdb_id = show_info.get("id") or "0000"
-    return titolo, f"{titolo} ({year}) {{tmdb-{tmdb_id}}}"
+    base = f"{titolo} ({year})"
+    # Nota: se "series_include_tmdb_id" è disattivato, serie omonime con lo stesso
+    # anno finiscono nella stessa cartella (scelta esplicita da Formato Nomi).
+    if CONFIG.get("series_include_tmdb_id", True):
+        tmdb_id = show_info.get("id") or "0000"
+        return titolo, f"{base} {{tmdb-{tmdb_id}}}"
+    return titolo, base
 
 
 def build_episode_name(show_title, season, episodes, ep_title, ext):
@@ -139,7 +145,7 @@ def build_episode_name(show_title, season, episodes, ep_title, ext):
     else:
         code = f"S{season:02d}E{episodes[0]:02d}"
     name = f"{show_title} - {code}"
-    if ep_title:
+    if ep_title and CONFIG.get("series_include_episode_title", True):
         name += f" - {sanitize_title(ep_title)}"
     return name + ext.lower()
 
@@ -168,6 +174,7 @@ class SeriesWorker(QThread):
         self.mounted_by_us = mounted_by_us
         self.did_unmount = False
         self._downloaded_shows = set()
+        self._season_posters = {}  # (tmdb_id, season) -> poster_path | None, una sola richiesta TMDB per stagione
 
         self._evt = threading.Event()
         self._answer = None
@@ -380,30 +387,41 @@ class SeriesWorker(QThread):
         it["tmdb_original"] = show_info.get("original", "")
         it["tmdb_localized"] = show_info.get("english_or_local", "")
         it["tmdb_year"] = show_info.get("year", "")
-        it["poster_path"] = show_info.get("poster_path")
+        it["poster_path"] = show_info.get("poster_path") if CONFIG.get("series_download_show_poster", True) else None
 
-        # Scarica poster della stagione
-        try:
-            from tmdb_client import get_season_details
-            season_info = get_season_details(it["tmdb_id"], it["season"], lang=it.get("lang"))
-            it["season_poster_path"] = season_info.get("poster_path") if season_info else None
-        except Exception:
-            it["season_poster_path"] = None
-
-        if not it.get("season") or not it.get("episodes"):
-        
+        has_episode_code = bool(it.get("season") and it.get("episodes"))
+        # Stagione/episodio sono obbligatori solo se li ricava il programma: se l'utente
+        # ha già impostato nome e cartella a mano (override completo), non bloccano nulla.
+        if not has_episode_code and not it.get("custom_override"):
             # Codice episodio non riconosciuto: l'utente deve correggerlo a mano
-            # (menu contestuale "Modifica Stagione/Episodio..."), mai una scelta silenziosa.
+            # (menu contestuale "Modifica episodio e nome..."), mai una scelta silenziosa.
             set_status(it, "series_status_unknown_ep")
             return
+
+        # Poster della stagione: una sola richiesta/​download per (serie, stagione), non per episodio,
+        # e solo dopo aver confermato che la stagione è nota (mai con season=None).
+        if has_episode_code and CONFIG.get("series_download_season_poster", True):
+            cache_key = (it["tmdb_id"], it["season"])
+            if cache_key not in self._season_posters:
+                try:
+                    from tmdb_client import get_season_details
+                    season_info = get_season_details(it["tmdb_id"], it["season"], lang=it.get("lang"))
+                    self._season_posters[cache_key] = season_info.get("poster_path") if season_info else None
+                except Exception:
+                    self._season_posters[cache_key] = None
+            it["season_poster_path"] = self._season_posters[cache_key]
+        else:
+            it["season_poster_path"] = None
 
         if not it.get("custom_override"):
             titolo, show_folder = build_show_folder(show_info)
             season_folder = f"Season {it['season']:02d}"
-            try:
-                ep_title = get_episode_title(it["tmdb_id"], it["season"], it["episodes"][0], lang=it.get("lang"))
-            except Exception:
-                ep_title = ""
+            ep_title = ""
+            if CONFIG.get("series_include_episode_title", True):
+                try:
+                    ep_title = get_episode_title(it["tmdb_id"], it["season"], it["episodes"][0], lang=it.get("lang"))
+                except Exception:
+                    ep_title = ""
             it["folder"] = f"{show_folder}/{season_folder}"
             it["newname"] = build_episode_name(titolo, it["season"], it["episodes"], ep_title, it["path"].suffix)
 
@@ -461,12 +479,12 @@ class SeriesWorker(QThread):
             progress_callback=self.file_progress.emit,
 		)
         
-        # Scarica poster della stagione dopo aver copiato/spostato il file
+        # Scarica poster della stagione dopo aver copiato/spostato il file.
+        # it["folder"] è già "{cartella serie}/Season NN": nessun bisogno di ricostruirlo.
         if it.get("season_poster_path"):
             from media_operations import download_poster
-            season_folder_path = f"{it['folder'].rsplit('/', 1)[0]}/Season {it['season']:02d}"
-            download_poster(it["season_poster_path"], season_folder_path, dest)
-        
+            download_poster(it["season_poster_path"], it["folder"], dest)
+
         if rename:
             set_status(it, "status_done_inplace")
         else:
@@ -474,9 +492,12 @@ class SeriesWorker(QThread):
 
         if self.clean_parent and self.action == "move":
             self._cleanup_dirs.setdefault(src_parent, i)
-        # Scarica poster della serie nella cartella principale (una volta sola)
-        show_folder_path = it['folder'].rsplit('/', 1)[0]
-        if it.get("poster_path") and it["tmdb_id"] not in self._downloaded_shows:
+        # Scarica poster della serie nella cartella principale (una volta sola).
+        # Presuppone folder = "{cartella serie}/Season NN": con un override manuale
+        # completo la struttura potrebbe non rispettarla, quindi si salta.
+        if (it.get("poster_path") and not it.get("custom_override")
+                and it["tmdb_id"] not in self._downloaded_shows):
             from media_operations import download_poster
+            show_folder_path = it["folder"].rsplit("/", 1)[0]
             download_poster(it["poster_path"], show_folder_path, dest)
             self._downloaded_shows.add(it["tmdb_id"])

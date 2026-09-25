@@ -4,6 +4,48 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
+## [0.4.0] - 2026-09-25
+
+### Aggiunto
+
+- **Triage automatico Film/Serie TV**: un'area di drop comune sopra le due schede
+  (`core/media_classifier.py`, nessuna chiamata di rete) smista da sola i file
+  trascinati nella scheda giusta; anche le tabelle di ciascuna scheda restano
+  ricettive a tutto e si "autocorreggono" spostando nell'altra scheda ciò che non
+  è suo. Nei casi davvero ambigui (nessun anno, nessun codice episodio) chiede
+  conferma, con il tipo della scheda/zona di drop come suggerimento predefinito.
+- **Dialogo "Formato Nomi"**, a fianco di Opzioni: destinazione, azione
+  Sposta/Copia, modalità titolo (solo originale / solo localizzato / entrambi in
+  un ordine o nell'altro) e i toggle su cosa includere nel nome/cartella
+  (ID TMDB, paese, regista, titolo episodio, poster) — indipendenti tra Film e
+  Serie TV.
+- Bottoni **Esegui selezionati** / **Esegui tutti** separati (con conteggio ed
+  azione in etichetta, es. "Sposta 3 sel." / "Copia tutto (12)"), al posto di un
+  unico "Esegui" che ereditava in modo implicito un'eventuale selezione residua.
+- Doppio click sulle colonne di nome/cartella per aprire la modifica
+  personalizzata (Film), e un unico dialogo "Modifica episodio e nome" per le
+  Serie TV (stagione/episodio + nome/cartella insieme, con stagione/episodio
+  non più bloccanti se il nome è stato impostato a mano).
+- Pulsante **Ripristina nome automatico** nei dialoghi di modifica personalizzata.
+- Selezione multipla da tastiera con **Ctrl+A**, oltre a Canc/Backspace.
+- Layout della barra superiore rivisto: Opzioni e Formato Nomi a sinistra, Log e
+  Crediti & Privacy a destra.
+
+### Corretto
+
+- Canc/Backspace sulla tabella disallineava le righe visualizzate dagli item
+  interni, causando modifiche/esecuzioni sulla riga sbagliata dopo un'eliminazione.
+- Cliccare su una riga già selezionata non la deselezionava più (il click veniva
+  "annullato" al rilascio del tasto da alcuni stili grafici, incluso quello
+  tipico di Linux Mint); ora un clic su una qualsiasi riga selezionata
+  deseleziona tutto, anche a tabella piena.
+- Il poster di stagione veniva richiesto a TMDB e riscaricato per ogni singolo
+  episodio invece che una sola volta per stagione.
+- Il poster di stagione veniva richiesto anche per episodi non riconosciuti
+  (stagione ignota), sprecando una chiamata TMDB.
+- Rimossa una classe `SettingsDialog` residua in `ui/widgets.py` che referenziava
+  una chiave di configurazione (`dest`) non più esistente dalla v0.3.
+
 ## [0.3.0] - 2026-09-25
 
 ### Aggiunto

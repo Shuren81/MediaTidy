@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
 ui/widgets.py - Widget e dialoghi condivisi da scheda Film e scheda Serie TV:
-tabella con drag&drop, dialogo duplicati, dialogo "cartella non vuota",
-Opzioni, Crediti & Privacy.
+tabella con drag&drop (Canc/Backspace + Ctrl+A, click per deselezionare),
+dialogo duplicati, dialogo "cartella non vuota", Crediti & Privacy.
+Le Opzioni (ui/settings_dialog.py) e il Formato Nomi (ui/format_dialog.py)
+sono in moduli propri.
 """
-from config import CONFIG, VERSION
+from config import VERSION
 from localization import tr
 
 from qtpy.QtCore import Qt, Signal
-from qtpy.QtGui import QColor, QPainter
+from qtpy.QtGui import QColor, QKeySequence, QPainter
 from qtpy.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QTableWidget,
-    QTabWidget, QTextBrowser, QVBoxLayout, QWidget, QAbstractItemView,
+    QCheckBox, QDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton,
+    QTableWidget, QTabWidget, QTextBrowser, QVBoxLayout, QWidget, QAbstractItemView,
 )
 
 # Compatibilità per costanti Qt tra PyQt5, PyQt6 e PySide
@@ -42,6 +43,7 @@ class ToggleableListWidget(QTableWidget):
     """Tabella con drag&drop e deselezione con un clic su una riga già selezionata.
     Generica: la scheda Film e la scheda Serie TV la usano con colonne diverse."""
     files_dropped = Signal(list)
+    delete_requested = Signal()  # Canc/Backspace: la tab decide come rimuovere (items + righe insieme)
 
     def __init__(self, headers, stretch_cols=(0, 1, 2)):
         super().__init__(0, len(headers))
@@ -100,10 +102,23 @@ class ToggleableListWidget(QTableWidget):
         modifiers = QApplication.keyboardModifiers()
         if modifiers == Qt.NoModifier:
             selected_rows = {i.row() for i in self.selectedIndexes()}
-            if len(selected_rows) == 1 and index.row() in selected_rows:
+            # Un clic semplice su QUALSIASI riga già selezionata deselezionaa tutto
+            # (non solo quando è selezionata una riga sola): utile anche a tabella
+            # piena, dove non c'è spazio vuoto su cui cliccare per deselezionare.
+            if selected_rows and index.row() in selected_rows:
                 self.clearSelection()
+                # Molti stili (incluso quello tipico di Linux Mint) confermano la
+                # selezione al RILASCIO del tasto, non alla pressione: senza questo,
+                # Qt riselezionerebbe la riga un istante dopo, vanificando il clear.
+                self._suppress_next_release = True
                 return
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if getattr(self, "_suppress_next_release", False):
+            self._suppress_next_release = False
+            return
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, e):
         super().paintEvent(e)
@@ -117,12 +132,55 @@ class ToggleableListWidget(QTableWidget):
             
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
-            rows = sorted({i.row() for i in self.selectedIndexes()}, reverse=True)
-            for r in rows:
-                self.removeRow(r)
+            # NON tocca le righe direttamente: emette solo il segnale, così la tab
+            # rimuove insieme la riga in tabella E l'item corrispondente in self.items
+            # (rimuoverle solo qui le farebbe disallineare — vedi remove_selected nelle tab).
+            if self.selectedIndexes():
+                self.delete_requested.emit()
+            event.accept()
+            return
+        if event.matches(QKeySequence.SelectAll):
+            self.selectAll()
             event.accept()
             return
         super().keyPressEvent(event)
+
+
+class DropZone(QLabel):
+    """Area di drop comune sopra le due schede: accetta film e serie insieme e lascia
+    che MainWindow li smisti con il classificatore automatico (core/media_classifier.py)."""
+    files_dropped = Signal(list)
+
+    def __init__(self, text_key="add_media_drop", parent=None):
+        super().__init__(parent)
+        self._text_key = text_key
+        self.setAcceptDrops(True)
+        self.setAlignment(ALIGN_CENTER)
+        self.setMinimumHeight(44)
+        self.setStyleSheet("""
+            QLabel {
+                border: 2px dashed #b0b0b0;
+                border-radius: 6px;
+                color: #808080;
+                padding: 8px;
+            }
+        """)
+        self.retranslate()
+
+    def retranslate(self):
+        self.setText(tr(self._text_key))
+
+    def dragEnterEvent(self, e):
+        e.acceptProposedAction() if e.mimeData().hasUrls() else e.ignore()
+
+    def dragMoveEvent(self, e):
+        self.dragEnterEvent(e)
+
+    def dropEvent(self, e):
+        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+        e.acceptProposedAction()
+        if paths:
+            self.files_dropped.emit(paths)
 
 
 class DuplicateDialog(QDialog):
@@ -251,84 +309,3 @@ class CreditsPrivacyDialog(QDialog):
         btn_close.clicked.connect(self.accept)
         lay.addWidget(btn_close)
 
-
-class SettingsDialog(QDialog):
-    """Opzioni condivise da entrambe le schede (chiave API, destinazione, lingua
-    TMDB, capitalizzazione, smontaggio automatico, pulizia cartelle di origine)."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(tr("opts_title"))
-        self.resize(540, 350)
-        layout = QVBoxLayout(self)
-        form = QFormLayout()
-
-        self.gui_lang_combo = QComboBox()
-        self.gui_lang_combo.addItem("Italiano", "it")
-        self.gui_lang_combo.addItem("English", "en")
-        idx_g = self.gui_lang_combo.findData(CONFIG.get("gui_lang", "it"))
-        if idx_g != -1:
-            self.gui_lang_combo.setCurrentIndex(idx_g)
-
-        self.api_key = QLineEdit(CONFIG["api_key"])
-        self.api_key.setEchoMode(ECHO_PASSWORD)
-
-        self.lbl_tmdb_help = QLabel(tr("tmdb_link_help"))
-        self.lbl_tmdb_help.setOpenExternalLinks(True)
-
-        self.dest = QLineEdit(CONFIG["dest"])
-        dest_layout = QHBoxLayout()
-        dest_layout.addWidget(self.dest)
-        browse_btn = QPushButton(tr("browse"))
-        browse_btn.clicked.connect(self._browse)
-        dest_layout.addWidget(browse_btn)
-
-        self.lang_combo = QComboBox()
-        self.lang_combo.addItems(["en-US", "it-IT", "es-ES", "fr-FR", "de-DE", "ja-JP"])
-        self.lang_combo.setCurrentText(CONFIG.get("lang", "en-US"))
-
-        self.cap_combo = QComboBox()
-        self.cap_combo.addItem(tr("cap_1"), 1)
-        self.cap_combo.addItem(tr("cap_2"), 2)
-        self.cap_combo.addItem(tr("cap_3"), 3)
-        idx = self.cap_combo.findData(CONFIG.get("cap_rule", 2))
-        if idx != -1:
-            self.cap_combo.setCurrentIndex(idx)
-
-        self.chk_unmount = QCheckBox(tr("unmount_chk"))
-        self.chk_unmount.setChecked(CONFIG.get("unmount", True))
-
-        self.chk_clean_dir = QCheckBox(tr("clean_dir_chk"))
-        self.chk_clean_dir.setChecked(CONFIG.get("clean_parent_dir", False))
-        if CONFIG.get("action", "move") == "copy":
-            self.chk_clean_dir.setEnabled(False)
-
-        form.addRow(tr("gui_lang_label"), self.gui_lang_combo)
-        form.addRow(tr("tmdb_key"), self.api_key)
-        form.addRow("", self.lbl_tmdb_help)
-        form.addRow(tr("dest_folder"), dest_layout)
-        form.addRow(tr("tmdb_search_lang"), self.lang_combo)
-        form.addRow(tr("capitalization"), self.cap_combo)
-        form.addRow("", self.chk_unmount)
-        form.addRow("", self.chk_clean_dir)
-
-        layout.addLayout(form)
-
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(self._save)
-        btns.rejected.connect(self.reject)
-        layout.addWidget(btns)
-
-    def _browse(self):
-        d = QFileDialog.getExistingDirectory(self, tr("dest_folder"), self.dest.text())
-        if d:
-            self.dest.setText(d)
-
-    def _save(self):
-        CONFIG["gui_lang"] = self.gui_lang_combo.currentData()
-        CONFIG["api_key"] = self.api_key.text().strip()
-        CONFIG["dest"] = self.dest.text().strip()
-        CONFIG["lang"] = self.lang_combo.currentText()
-        CONFIG["cap_rule"] = self.cap_combo.currentData()
-        CONFIG["unmount"] = self.chk_unmount.isChecked()
-        CONFIG["clean_parent_dir"] = self.chk_clean_dir.isChecked()
-        self.accept()

@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
 ui/series_tab.py - Scheda "Serie TV": tabella con drag&drop di file o cartelle di
-release, Test/Esegui, dialogo di conferma TMDB, menu contestuale (modifica
-Stagione/Episodio, codice TMDB, lingua), duplicati e cartelle non vuote.
-Usa core/series_handler.py per tutta la logica.
+release, Test/Esegui (selezionati/tutti), dialogo di conferma TMDB, un unico dialogo
+"Modifica episodio e nome" (stagione/episodio + nome/cartella), duplicati e cartelle
+non vuote. Usa core/series_handler.py per la logica.
 """
 from pathlib import Path
 
 from config import CONFIG
 from localization import tr
 from media_operations import play_system_sound, send_mint_notification
+from text_utils import sanitize_title
 from tmdb_client import search_tv
 from core.movie_handler import DONE_KEYS, ERROR_KEYS, READY_KEYS, SKIP_KEYS, is_done, set_status, status_text
-from core.series_handler import SeriesWorker, collect_items_for_path, is_ready
+from core.series_handler import SeriesWorker, collect_items_for_path, is_ready, make_item
 from ui.widgets import (
     ITEM_ENABLED, ITEM_SELECTABLE, ROLE_USER, DuplicateDialog, NonEmptyDirDialog,
     ToggleableListWidget,
@@ -21,11 +22,14 @@ from ui.widgets import (
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QColor, QCursor
 from qtpy.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
-    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
-    QProgressBar, QPushButton, QRadioButton, QSpinBox, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
+    QProgressBar, QPushButton, QRadioButton, QSpinBox, QTableWidgetItem, QVBoxLayout,
+    QWidget,
 )
+
+# Colonne su cui il doppio click apre "Modifica episodio e nome"
+UNIFIED_EDIT_COLS = (2, 3, 4)
 
 
 class TvChoiceDialog(QDialog):
@@ -120,10 +124,7 @@ class SeriesTab(QWidget):
         self.top_bar.addWidget(self.lbl_action)
         self.radio_move = QRadioButton()
         self.radio_copy = QRadioButton()
-        if CONFIG.get("action", "move") == "move":
-            self.radio_move.setChecked(True)
-        else:
-            self.radio_copy.setChecked(True)
+        self._set_radio_from_config()
         self.radio_move.toggled.connect(self._update_action_mode)
         self.top_bar.addWidget(self.radio_move)
         self.top_bar.addWidget(self.radio_copy)
@@ -131,10 +132,15 @@ class SeriesTab(QWidget):
         self.lay.addLayout(self.top_bar)
 
         self.table = ToggleableListWidget(SERIES_HEADERS, stretch_cols=(0, 1, 3, 4))
-        self.table.files_dropped.connect(self.add_paths)
+        # Il drag&drop sulla tabella passa dal triage automatico di MainWindow, non da
+        # add_paths direttamente: vedi MainWindow._dispatch. add_paths resta usato solo
+        # dai pulsanti "Aggiungi file/Aggiungi release" di QUESTA scheda (scelta esplicita).
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
         self.table.itemChanged.connect(self.on_item_changed)
+        self.table.itemDoubleClicked.connect(self.on_item_double_clicked)
+        self.table.itemSelectionChanged.connect(self.update_buttons)
+        self.table.delete_requested.connect(self.remove_selected)
         self.lay.addWidget(self.table, 1)
 
         self.progress_bar = QProgressBar()
@@ -148,20 +154,23 @@ class SeriesTab(QWidget):
         self.btn_remove = QPushButton()
         self.btn_clear = QPushButton()
         self.btn_test = QPushButton()
-        self.btn_rename = QPushButton()
+        self.btn_exec_sel = QPushButton()
+        self.btn_exec_all = QPushButton()
 
         self.btn_add_files.clicked.connect(self.pick_files)
         self.btn_add_dir.clicked.connect(self.pick_dir)
         self.btn_remove.clicked.connect(self.remove_selected)
         self.btn_clear.clicked.connect(self.clear_all)
         self.btn_test.clicked.connect(lambda: self.start("test"))
-        self.btn_rename.clicked.connect(lambda: self.start("action"))
+        self.btn_exec_sel.clicked.connect(lambda: self.start("action", scope="selected"))
+        self.btn_exec_all.clicked.connect(lambda: self.start("action", scope="all"))
 
         for b in (self.btn_add_files, self.btn_add_dir, self.btn_remove, self.btn_clear):
             self.row_btns.addWidget(b)
         self.row_btns.addStretch(1)
         self.row_btns.addWidget(self.btn_test)
-        self.row_btns.addWidget(self.btn_rename)
+        self.row_btns.addWidget(self.btn_exec_sel)
+        self.row_btns.addWidget(self.btn_exec_all)
         self.lay.addLayout(self.row_btns)
 
         self.status_callback = None  # impostato da MainWindow -> statusBar().showMessage
@@ -169,33 +178,45 @@ class SeriesTab(QWidget):
         self.update_buttons()
 
     # ------------------------------------------------------------------ #
+    def _set_radio_from_config(self):
+        if CONFIG.get("action_series", "move") == "move":
+            self.radio_move.setChecked(True)
+        else:
+            self.radio_copy.setChecked(True)
+
     def retranslate_ui(self):
         self.lbl_action.setText(tr("file_action"))
         self.radio_move.setText(tr("move"))
         self.radio_copy.setText(tr("copy"))
         self.btn_add_files.setText(tr("add_files"))
-        self.btn_add_dir.setText(tr("add_dir"))
+        self.btn_add_dir.setText(tr("series_add_release"))
         self.btn_remove.setText(tr("remove_sel"))
         self.btn_clear.setText(tr("clear_all"))
         self.btn_test.setText(tr("test"))
-        self.btn_rename.setText(tr("execute"))
         self.table.update_headers()
         for i in range(len(self.items)):
             self.refresh_row(i)
+        self.update_buttons()
 
     def _show_status(self, msg):
         if self.status_callback:
             self.status_callback(msg)
 
     def _update_action_mode(self):
-        CONFIG["action"] = "move" if self.radio_move.isChecked() else "copy"
+        CONFIG["action_series"] = "move" if self.radio_move.isChecked() else "copy"
+        self.update_buttons()
 
     def config_changed(self):
+        """Chiamato da MainWindow dopo che Opzioni o Formato Nomi sono stati salvati."""
         for it in self.items:
             if is_ready(it) or it.get("status") == "status_already_exists":
                 set_status(it, "status_to_test")
+        self.radio_move.blockSignals(True)
+        self.radio_copy.blockSignals(True)
+        self._set_radio_from_config()
+        self.radio_move.blockSignals(False)
+        self.radio_copy.blockSignals(False)
         self.retranslate_ui()
-        self.update_buttons()
 
     # ------------------------------------------------------------------ #
     def pick_files(self):
@@ -227,13 +248,20 @@ class SeriesTab(QWidget):
             new_items = collect_items_for_path(p, known)
             for it in new_items:
                 known.add(it["path"])
-                self.items.append(it)
-                self.table.insertRow(self.table.rowCount())
-                self.refresh_row(len(self.items) - 1)
+                self.add_item(it)
                 added += 1
         if not added and paths:
             self._show_status(tr("no_video_found"))
         self.update_buttons()
+
+    def add_item(self, item_dict):
+        """Aggiunge un item già pronto (usato anche dal triage automatico)."""
+        self.items.append(item_dict)
+        self.table.insertRow(self.table.rowCount())
+        self.refresh_row(len(self.items) - 1)
+
+    def known_paths(self):
+        return {it["path"] for it in self.items}
 
     def remove_selected(self):
         if self._busy():
@@ -288,6 +316,13 @@ class SeriesTab(QWidget):
         self.refresh_row(row)
         self.update_buttons()
 
+    def on_item_double_clicked(self, item):
+        row = item.row()
+        if self._busy() or not (0 <= row < len(self.items)):
+            return
+        if item.column() in UNIFIED_EDIT_COLS:
+            self._edit_unified_dialog(row)
+
     def show_context_menu(self, pos):
         if self._busy():
             return
@@ -297,7 +332,7 @@ class SeriesTab(QWidget):
 
         it = self.items[row]
         menu = QMenu(self)
-        act_ep = menu.addAction(tr("series_ctx_edit_ep"))
+        act_edit = menu.addAction(tr("series_ctx_edit_unified"))
         act_tmdb = menu.addAction(tr("ctx_tmdb"))
         act_lang = menu.addAction(tr("ctx_lang"))
 
@@ -315,8 +350,8 @@ class SeriesTab(QWidget):
         exec_func = getattr(menu, "exec_", None) or getattr(menu, "exec")
         action = exec_func(QCursor.pos())
 
-        if action == act_ep:
-            self._edit_episode_dialog(row)
+        if action == act_edit:
+            self._edit_unified_dialog(row)
         elif action == act_tmdb:
             self._edit_tmdb_dialog(row)
         elif action == act_lang:
@@ -337,10 +372,14 @@ class SeriesTab(QWidget):
             self.table.removeRow(row)
             self.update_buttons()
 
-    def _edit_episode_dialog(self, row):
+    def _edit_unified_dialog(self, row):
+        """Un solo dialogo per Stagione/Episodio e, facoltativamente, nome/cartella
+        personalizzati. Stagione/episodio vengono sempre applicati; nome/cartella
+        solo se la checkbox "Personalizza" è attiva — altrimenti li ricalcola il
+        prossimo Test, una volta noti stagione ed episodio."""
         it = self.items[row]
         dlg = QDialog(self)
-        dlg.setWindowTitle(tr("series_edit_ep_title"))
+        dlg.setWindowTitle(tr("series_edit_unified_title"))
         layout = QFormLayout(dlg)
 
         season_in = QSpinBox()
@@ -357,22 +396,77 @@ class SeriesTab(QWidget):
         layout.addRow(tr("series_episode_label"), ep_in)
         layout.addRow(tr("series_episode_last_label"), ep_last_in)
 
+        chk_custom = QCheckBox(tr("customize_name_chk"))
+        chk_custom.setChecked(bool(it.get("custom_override")))
+        layout.addRow("", chk_custom)
+
+        name_in = QLineEdit(it["newname"] or it["path"].name)
+        folder_in = QLineEdit(it["folder"])
+        name_in.setEnabled(chk_custom.isChecked())
+        folder_in.setEnabled(chk_custom.isChecked())
+        chk_custom.toggled.connect(name_in.setEnabled)
+        chk_custom.toggled.connect(folder_in.setEnabled)
+        layout.addRow(tr("new_filename"), name_in)
+        layout.addRow(tr("dest_subfolder"), folder_in)
+
+        if it.get("custom_override"):
+            reset_row = QHBoxLayout()
+            btn_reset = QPushButton(tr("reset_auto_name"))
+            btn_reset.clicked.connect(lambda: dlg.done(2))
+            reset_row.addWidget(btn_reset)
+            reset_row.addStretch(1)
+            layout.addRow("", reset_row)
+
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(dlg.accept)
         btns.rejected.connect(dlg.reject)
         layout.addWidget(btns)
 
-        if dlg.exec_() == QDialog.Accepted:
+        while True:
+            result = dlg.exec_()
+            if result == 2:  # "Ripristina nome automatico" (non tocca stagione/episodio)
+                it["custom_override"] = False
+                set_status(it, "status_to_test")
+                self.refresh_row(row)
+                self.update_buttons()
+                return True
+            if result != QDialog.Accepted:
+                return False
+
             season = season_in.value()
             first = ep_in.value()
             last = ep_last_in.value()
             episodes = tuple(range(first, last + 1)) if last and last > first else (first,)
+
+            if chk_custom.isChecked():
+                raw_name = name_in.text().strip()
+                raw_folder = folder_in.text().strip()
+                folder_path = Path(raw_folder) if raw_folder else None
+                name = sanitize_title(raw_name, fix_apos=False)
+                invalid = (
+                    not name or name in (".", "..")
+                    or "/" in raw_name or "\\" in raw_name
+                    or (folder_path is not None
+                        and (folder_path.is_absolute() or ".." in folder_path.parts))
+                )
+                if invalid:
+                    QMessageBox.warning(self, tr("invalid_custom_title"), tr("invalid_custom_msg"))
+                    continue
+                it["newname"] = name
+                it["folder"] = ("/".join(sanitize_title(part, fix_apos=False) for part in folder_path.parts)
+                                 if folder_path else "")
+                it["custom_override"] = True
+                new_status = "status_ready_custom"
+            else:
+                it["custom_override"] = False
+                new_status = "status_to_test"
+
             it["season"] = season
             it["episodes"] = episodes
-            it["custom_override"] = False  # nome/cartella vanno ricalcolati al prossimo Test
-            set_status(it, "status_to_test")
+            set_status(it, new_status)
             self.refresh_row(row)
             self.update_buttons()
+            return True
 
     def _edit_tmdb_dialog(self, row):
         it = self.items[row]
@@ -417,15 +511,24 @@ class SeriesTab(QWidget):
     def update_buttons(self, idle=False):
         busy = not idle and self._busy()
         self.btn_test.setEnabled(not busy and bool(self.items))
-        self.btn_rename.setEnabled(not busy and any(is_ready(it) for it in self.items))
         for b in self._action_buttons():
             b.setEnabled(not busy)
 
+        selected_rows = {i.row() for i in self.table.selectedIndexes()}
+        n_ready_all = sum(1 for it in self.items if is_ready(it))
+        n_ready_sel = sum(1 for i in selected_rows if is_ready(self.items[i]))
+        action_word = tr("action_move_short") if CONFIG.get("action_series", "move") == "move" else tr("action_copy_short")
+
+        self.btn_exec_sel.setText(f"{action_word} {tr('exec_sel_suffix', n=n_ready_sel)}")
+        self.btn_exec_sel.setEnabled(not busy and n_ready_sel > 0)
+        self.btn_exec_all.setText(f"{action_word} {tr('exec_all_suffix', n=n_ready_all)}")
+        self.btn_exec_all.setEnabled(not busy and n_ready_all > 0)
+
     def update_buttons_busy(self):
-        for b in (self.btn_test, self.btn_rename, *self._action_buttons()):
+        for b in (self.btn_test, self.btn_exec_sel, self.btn_exec_all, *self._action_buttons()):
             b.setEnabled(False)
 
-    def start(self, mode):
+    def start(self, mode, scope="selected"):
         if mode == "test" and not CONFIG["api_key"].strip():
             QMessageBox.warning(self, tr("missing_key_title"), tr("missing_key_msg"))
             return
@@ -433,11 +536,15 @@ class SeriesTab(QWidget):
             QMessageBox.warning(self, tr("missing_dest_title"), tr("missing_dest_msg"))
             return
 
-        selected_rows = sorted({i.row() for i in self.table.selectedIndexes()})
-        candidates = selected_rows or range(len(self.items))
         if mode == "test":
+            selected_rows = sorted({i.row() for i in self.table.selectedIndexes()})
+            candidates = selected_rows or range(len(self.items))
             rows = [i for i in candidates if not is_done(self.items[i])]
         else:
+            if scope == "selected":
+                candidates = sorted({i.row() for i in self.table.selectedIndexes()})
+            else:
+                candidates = range(len(self.items))
             rows = [i for i in candidates if is_ready(self.items[i])]
 
         if not rows:
@@ -449,7 +556,7 @@ class SeriesTab(QWidget):
 
         self.worker = SeriesWorker(
             self.items, rows, mode,
-            action=CONFIG.get("action", "move"),
+            action=CONFIG.get("action_series", "move"),
             unmount_after=CONFIG.get("unmount", True),
             clean_parent=CONFIG.get("clean_parent_dir", False),
             mounted_by_us=self.mounted_by_us,
@@ -459,6 +566,7 @@ class SeriesTab(QWidget):
         self.worker.mounted.connect(self.on_mounted)
         self.worker.unmounted.connect(self.on_unmounted)
         self.worker.row_update.connect(self.refresh_row)
+        self.worker.row_update.connect(lambda _i: self.update_buttons())
         self.worker.file_progress.connect(self.progress_bar.setValue)
         self.worker.progress.connect(self.on_progress)
         self.worker.ask.connect(self.on_ask)
@@ -470,7 +578,10 @@ class SeriesTab(QWidget):
         self.worker.start()
 
     def on_progress(self, current, total):
-        act_name = tr("test") if self.worker and self.worker.mode == "test" else (tr("move") if CONFIG["action"] == "move" else tr("copy"))
+        if self.worker and self.worker.mode == "test":
+            act_name = tr("test")
+        else:
+            act_name = tr("move") if CONFIG.get("action_series", "move") == "move" else tr("copy")
         self._show_status(f"{act_name}: {current}/{total}")
 
     def on_ask(self, row, results, guessed):
@@ -511,6 +622,7 @@ class SeriesTab(QWidget):
         if self.worker and self.worker.did_unmount:
             msg += tr("unmounted_msg")
         self._show_status(msg)
+        self.update_buttons(idle=True)
 
     def on_error(self, msg):
         self.progress_bar.setVisible(False)
