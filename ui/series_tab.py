@@ -19,7 +19,7 @@ from ui.widgets import (
     ToggleableListWidget,
 )
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import QColor, QCursor
 from qtpy.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
@@ -34,7 +34,7 @@ UNIFIED_EDIT_COLS = (2, 3, 4)
 
 class TvChoiceDialog(QDialog):
     """Conferma/ricerca manuale della serie quando TMDB non trova un risultato certo."""
-    def __init__(self, guessed, results, parent=None, lang=None):
+    def __init__(self, guessed, results, parent=None, lang=None, show_apply_release=False):
         super().__init__(parent)
         self.lang = lang
         self.setWindowTitle(tr("series_choice_title"))
@@ -56,6 +56,11 @@ class TvChoiceDialog(QDialog):
         row.addWidget(btn)
         lay.addLayout(row)
 
+        self.chk_apply_release = None
+        if show_apply_release:
+            self.chk_apply_release = QCheckBox(tr("series_apply_release_chk"))
+            lay.addWidget(self.chk_apply_release)
+
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.buttons.button(QDialogButtonBox.Ok).setText(tr("ok"))
         self.buttons.button(QDialogButtonBox.Cancel).setText(tr("skip_file"))
@@ -63,6 +68,9 @@ class TvChoiceDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.buttons)
         self._fill(results)
+
+    def apply_to_release_checked(self):
+        return bool(self.chk_apply_release and self.chk_apply_release.isChecked())
 
     def _fill(self, results):
         self.list.clear()
@@ -111,6 +119,8 @@ def _ep_text(it):
 
 
 class SeriesTab(QWidget):
+    items_changed = Signal()  # numero di item cambiato: la finestra aggiorna il conteggio in tab
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.items = []
@@ -259,6 +269,7 @@ class SeriesTab(QWidget):
         self.items.append(item_dict)
         self.table.insertRow(self.table.rowCount())
         self.refresh_row(len(self.items) - 1)
+        self.items_changed.emit()
 
     def known_paths(self):
         return {it["path"] for it in self.items}
@@ -523,6 +534,7 @@ class SeriesTab(QWidget):
         self.btn_exec_sel.setEnabled(not busy and n_ready_sel > 0)
         self.btn_exec_all.setText(f"{action_word} {tr('exec_all_suffix', n=n_ready_all)}")
         self.btn_exec_all.setEnabled(not busy and n_ready_all > 0)
+        self.items_changed.emit()
 
     def update_buttons_busy(self):
         for b in (self.btn_test, self.btn_exec_sel, self.btn_exec_all, *self._action_buttons()):
@@ -586,14 +598,40 @@ class SeriesTab(QWidget):
 
     def on_ask(self, row, results, guessed):
         self.table.selectRow(row)
-        dlg = TvChoiceDialog(guessed, results, self, lang=self.items[row].get("lang"))
-        choice = dlg.selected() if dlg.exec_() == QDialog.Accepted else None
+        release_dir = self.items[row].get("release_dir")
+        has_siblings = bool(release_dir) and any(
+            j != row and self.items[j].get("release_dir") == release_dir and not self.items[j].get("tmdb_id")
+            for j in range(len(self.items))
+        )
+        dlg = TvChoiceDialog(guessed, results, self, lang=self.items[row].get("lang"),
+                              show_apply_release=has_siblings)
+        if dlg.exec_() == QDialog.Accepted:
+            choice = dlg.selected()
+            if choice and dlg.apply_to_release_checked():
+                self._propagate_tmdb_id(row, str(choice["id"]))
+        else:
+            choice = None
         self.worker.provide(choice)
+
+    def _propagate_tmdb_id(self, row, tmdb_id):
+        """Scrive lo stesso codice TMDB sugli altri item non ancora testati che
+        condividono lo stesso release_dir (stessa cartella trascinata dall'utente),
+        per evitare un popup di conferma per ogni episodio di una release già
+        organizzata Serie/Stagione/Episodio. Sicuro: il Worker resta bloccato in
+        attesa di questa risposta, nessun altro thread tocca self.items nel frattempo."""
+        release_dir = self.items[row].get("release_dir")
+        if not release_dir:
+            return
+        for j, it in enumerate(self.items):
+            if j == row or it.get("release_dir") != release_dir or it.get("tmdb_id"):
+                continue
+            it["tmdb_id"] = tmdb_id
+            self.refresh_row(j)
 
     def on_ask_duplicate(self, row):
         self.table.selectRow(row)
         it = self.items[row]
-        dlg = DuplicateDialog(it["folder"], it["newname"], self)
+        dlg = DuplicateDialog(it["folder"], it["newname"], dest=CONFIG["dest_series"], parent=self)
         if dlg.exec_() == QDialog.Accepted:
             self.worker.provide_dup_choice(dlg.choice, dlg.apply_to_all)
         else:

@@ -4,6 +4,39 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
+## [0.6.1] - 2026-09-25
+
+### Aggiunto
+
+- Il nome di ciascuna scheda mostra ora anche il numero totale di file
+  importati, es. "Film (12)" / "Serie TV (34)" — aggiornato in tempo reale
+  ad ogni aggiunta o rimozione, sia dal drag&drop sia dal triage automatico,
+  e coerente anche dopo un cambio di lingua interfaccia.
+
+## [0.6.0] - 2026-09-25
+
+### Aggiunto
+
+- **Evidenziazione tab all'import**: dopo ogni rilascio (ovunque avvenga —
+  tabella giusta, sbagliata, o area neutra della finestra), MediaTidy passa
+  automaticamente alla scheda che ha ricevuto più file in quel singolo
+  trascinamento. In caso di parità (incluso nessun file importato) la scheda
+  attiva non cambia.
+- Nel dialogo di conferma serie TV, una nuova checkbox **"Applica anche agli
+  altri episodi di questa release"**: se confermata, scrive lo stesso codice
+  TMDB su tutti gli altri episodi ancora da testare che condividono la stessa
+  cartella di origine, evitando un popup identico per ogni file di una
+  release già organizzata Serie/Stagione/Episodio.
+- Bottone **"Apri cartella"** nel dialogo "cartella di origine non vuota" e
+  in quello dei duplicati (quest'ultimo solo per destinazioni locali), per
+  vedere il contenuto prima di decidere.
+- **Icona personalizzata dell'applicazione** (`MT_Icon.png`) al posto
+  dell'icona di default nella barra del titolo/applicazioni.
+- **Paese di produzione anche per le serie TV**, nel formato
+  `Titolo (Paese, Anno)` — diverso dal formato film, che resta invariato per
+  ora. Attivabile/disattivabile con una nuova checkbox indipendente nella
+  scheda Serie TV di Formato Nomi.
+
 ## [0.5.3] - 2026-09-25
 
 ### Corretto
@@ -41,6 +74,11 @@ Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
   sopra le tabelle Film/Serie (prima lo faceva solo trascinando su un'area
   neutra della finestra, perché le tabelle intercettano il trascinamento con
   la precedenza voluta e la finestra non se ne accorgeva più).
+- L'etichetta ora resta verde/rossa fissa anche dopo un rilascio avvenuto
+  sopra una tabella (prima questo accadeva solo per i rilasci sull'area
+  neutra della finestra).
+- Il testo dell'etichetta usa `font-weight: bold` invece del valore numerico
+  `800`, più affidabile su diversi temi/font di sistema.
 
 ## [0.5.0] - 2026-09-25
 
@@ -52,9 +90,10 @@ Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 - **Tutta la finestra è ora area di rilascio** (non solo un riquadro dedicato):
   le tabelle mantengono la precedenza quando il drop avviene sopra di loro.
 - Il riquadro di drop in alto è stato sostituito da un'etichetta col nome del
-  programma ("MediaTidy v{VERSION} by Shuren") che segnala anch'essa lo stato
-  del trascinamento, ma con esito **fisso** (verde o rosso) finché non si
-  ricomincia a trascinare, a differenza del lampeggio breve delle tabelle.
+  programma ("MediaTidy v{VERSION} by Shuren", poi ingrandita in stile banner
+  con bordo colorato) che segnala anch'essa lo stato del trascinamento, ma con
+  esito **fisso** (verde o rosso) finché non si ricomincia a trascinare, a
+  differenza del lampeggio breve delle tabelle.
 
 ### Rimosso
 
@@ -90,6 +129,15 @@ Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 - Selezione multipla da tastiera con **Ctrl+A**, oltre a Canc/Backspace.
 - Layout della barra superiore rivisto: Opzioni e Formato Nomi a sinistra, Log e
   Crediti & Privacy a destra.
+- **Feedback visivo sul trascinamento**: le tabelle Film/Serie mostrano un
+  contorno giallo mentre si trascina sopra, e un lampeggio verde/rosso di circa
+  mezzo secondo dopo il rilascio a seconda che sia stato importato qualcosa o no.
+- **Tutta la finestra è ora area di rilascio** (non solo un riquadro dedicato):
+  le tabelle mantengono la precedenza quando il drop avviene sopra di loro.
+- Il riquadro di drop in alto è stato sostituito da un'etichetta col nome del
+  programma ("MediaTidy v{VERSION} by Shuren") che segnala anch'essa lo stato
+  del trascinamento, ma con esito **fisso** (verde o rosso) finché non si
+  ricomincia a trascinare, a differenza del lampeggio breve delle tabelle.
 
 ### Corretto
 
@@ -105,6 +153,11 @@ Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
   (stagione ignota), sprecando una chiamata TMDB.
 - Rimossa una classe `SettingsDialog` residua in `ui/widgets.py` che referenziava
   una chiave di configurazione (`dest`) non più esistente dalla v0.3.
+- Rimosso il controllo Sposta/Copia dal dialogo Formato Nomi: era duplicato
+  rispetto al radio button di ciascuna scheda (unico punto rimasto per
+  impostare l'azione, più comodo da raggiungere durante il lavoro quotidiano).
+- Rimossa l'area di drop dedicata (`DropZone`, non più usata) in favore
+  dell'intera finestra come area di rilascio.
 
 ## [0.3.0] - 2026-09-25
 

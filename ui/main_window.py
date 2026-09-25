@@ -92,6 +92,8 @@ class MainWindow(QMainWindow):
         self.series_tab.table.files_dropped.connect(self._on_dropped_series)
         self.movie_tab.table.drag_state_changed.connect(self._on_table_drag_state)
         self.series_tab.table.drag_state_changed.connect(self._on_table_drag_state)
+        self.movie_tab.items_changed.connect(self._update_tab_titles)
+        self.series_tab.items_changed.connect(self._update_tab_titles)
 
         self.tabs.addTab(self.movie_tab, "")
         self.tabs.addTab(self.series_tab, "")
@@ -106,12 +108,16 @@ class MainWindow(QMainWindow):
         self.btn_log.setText(tr("log_btn"))
         self.btn_credits.setText(tr("credits_btn"))
 
-        self.tabs.setTabText(0, tr("tab_movies"))
-        self.tabs.setTabText(1, tr("tab_series"))
+        self._update_tab_titles()
 
         self.statusBar().showMessage(tr("ready_status"))
         self.movie_tab.retranslate_ui()
         self.series_tab.retranslate_ui()
+
+    def _update_tab_titles(self):
+        """Nome scheda + numero totale di file importati in quella scheda."""
+        self.tabs.setTabText(0, f"{tr('tab_movies')} ({len(self.movie_tab.items)})")
+        self.tabs.setTabText(1, f"{tr('tab_series')} ({len(self.series_tab.items)})")
 
     # ------------------------------------------------------------------ #
     #  Etichetta col nome del programma: stato del trascinamento
@@ -141,14 +147,6 @@ class MainWindow(QMainWindow):
     def dragLeaveEvent(self, e):
         self._set_title_color(self._last_result_color)
         super().dragLeaveEvent(e)
-        
-    def _on_table_drag_state(self, active):
-        """Le tabelle intercettano il drag prima della finestra: questo tiene
-        comunque gialla l'etichetta anche quando il trascinamento è sopra di loro."""
-        if active:
-            self._set_title_color("yellow")
-        else:
-            self._set_title_color(self._last_result_color)    
 
     def dropEvent(self, e):
         paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
@@ -183,6 +181,14 @@ class MainWindow(QMainWindow):
             self.series_tab.table.flash_failure()
             self._last_result_color = "red"
         self._set_title_color(self._last_result_color)
+
+    def _on_table_drag_state(self, active):
+        """Le tabelle intercettano il drag prima della finestra: questo tiene
+        comunque gialla l'etichetta anche quando il trascinamento è sopra di loro."""
+        if active:
+            self._set_title_color("yellow")
+        else:
+            self._set_title_color(self._last_result_color)
 
     def _dispatch(self, paths, default_hint):
         """Classifica i percorsi trascinati (senza rete) e li smista nella scheda
@@ -221,6 +227,12 @@ class MainWindow(QMainWindow):
         self.series_tab.update_buttons()
         if n_movies or n_series:
             self.statusBar().showMessage(tr("triage_result", movies=n_movies, series=n_series))
+        # Evidenziazione tab all'import: vai dove è finita la maggior parte dei file
+        # di QUESTO trascinamento; in caso di parità (incluso 0-0) resta dov'eri.
+        if n_movies > n_series:
+            self.tabs.setCurrentWidget(self.movie_tab)
+        elif n_series > n_movies:
+            self.tabs.setCurrentWidget(self.series_tab)
         return n_movies, n_series
 
     def _ask_ambiguous(self, cf, default_hint):

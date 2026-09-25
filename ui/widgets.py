@@ -8,13 +8,22 @@ sono in moduli propri.
 """
 from config import VERSION
 from localization import tr
+from media_operations import is_remote
 
-from qtpy.QtCore import Qt, QTimer, Signal
-from qtpy.QtGui import QColor, QKeySequence, QPainter
+from pathlib import Path
+
+from qtpy.QtCore import QUrl, Qt, QTimer, Signal
+from qtpy.QtGui import QColor, QDesktopServices, QKeySequence, QPainter
 from qtpy.QtWidgets import (
     QCheckBox, QDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTabWidget, QTextBrowser, QVBoxLayout, QWidget, QAbstractItemView,
 )
+
+
+def _open_folder(path):
+    """Apre una cartella locale nel file manager di sistema (nessun effetto se
+    il percorso non esiste o siamo su una destinazione remota — non chiamarla in quel caso)."""
+    QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
 # Colori del feedback di trascinamento, condivisi da tabelle e finestra principale.
 DRAG_ACTIVE_COLOR = QColor(230, 180, 0)   # giallo: si sta trascinando sopra l'area
@@ -98,6 +107,7 @@ class ToggleableListWidget(QTableWidget):
             e.acceptProposedAction()
             self._drag_active = True
             self._apply_border()
+            self.drag_state_changed.emit(True)
         else:
             e.ignore()
 
@@ -107,6 +117,7 @@ class ToggleableListWidget(QTableWidget):
     def dragLeaveEvent(self, e):
         self._drag_active = False
         self._apply_border()
+        self.drag_state_changed.emit(False)
         super().dragLeaveEvent(e)
 
     def dropEvent(self, e):
@@ -114,13 +125,16 @@ class ToggleableListWidget(QTableWidget):
         e.acceptProposedAction()
         self._drag_active = False
         self._apply_border()
+        self.drag_state_changed.emit(False)
         if paths:
             self.files_dropped.emit(paths)
 
     def flash_success(self):
+        """Lampeggio verde breve: il rilascio ha importato qualcosa (qui o nell'altra scheda)."""
         self._start_flash(DRAG_SUCCESS_COLOR)
 
     def flash_failure(self):
+        """Lampeggio rosso breve: il rilascio non ha portato nulla di utile."""
         self._start_flash(DRAG_FAILURE_COLOR)
 
     def _start_flash(self, color):
@@ -133,6 +147,9 @@ class ToggleableListWidget(QTableWidget):
         self._apply_border()
 
     def _apply_border(self):
+        """Bordo colorato via foglio di stile (mai un QPainter diretto su self: QTableWidget
+        eredita da QAbstractScrollArea, che espone solo il viewport() come vera superficie di
+        disegno — dipingere su self genera gli avvisi 'Paint device returned engine == 0')."""
         color = DRAG_ACTIVE_COLOR if self._drag_active else self._flash_color
         border_css = f"QTableWidget {{ border: 3px solid {color.name()}; }}" if color else ""
         self.setStyleSheet(self._base_style + border_css)
@@ -193,10 +210,10 @@ class ToggleableListWidget(QTableWidget):
 
 
 class DuplicateDialog(QDialog):
-    def __init__(self, folder, filename, parent=None):
+    def __init__(self, folder, filename, dest=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr("dup_title"))
-        self.resize(560, 260)
+        self.resize(560, 300)
         self.choice = "skip"
         self.apply_to_all = False
 
@@ -205,6 +222,11 @@ class DuplicateDialog(QDialog):
         lbl = QLabel(msg)
         lbl.setWordWrap(True)
         lay.addWidget(lbl)
+
+        if dest and not is_remote(dest):
+            btn_open = QPushButton(tr("btn_open_folder"))
+            btn_open.clicked.connect(lambda: _open_folder(Path(dest) / folder))
+            lay.addWidget(btn_open)
 
         btn_layout = QVBoxLayout()
         self.btn_overwrite = QPushButton(tr("dup_opt1"))
@@ -245,6 +267,10 @@ class NonEmptyDirDialog(QDialog):
         lbl = QLabel(msg)
         lbl.setWordWrap(True)
         lay.addWidget(lbl)
+
+        btn_open = QPushButton(tr("btn_open_folder"))
+        btn_open.clicked.connect(lambda: _open_folder(dir_path))
+        lay.addWidget(btn_open)
 
         btn_layout = QHBoxLayout()
         self.btn_yes = QPushButton(tr("btn_yes"))

@@ -92,6 +92,7 @@ class FormatDialog(QDialog):
             tr("dest_series_label"), CONFIG["dest_series"],
             [
                 ("series_include_tmdb_id", "series_include_tmdb_id", "series_tmdb_id_note"),
+                ("series_include_country", "series_include_country", None),
                 ("series_include_episode_title", "series_include_episode_title", None),
                 ("series_download_show_poster", "series_download_show_poster", None),
                 ("series_download_season_poster", "series_download_season_poster", None),
@@ -118,6 +119,7 @@ class FormatDialog(QDialog):
         CONFIG["dest_series"] = self.series_tab.dest.text().strip()
         CONFIG["series_title_mode"] = self.series_tab.title_mode()
         CONFIG["series_include_tmdb_id"] = self.series_tab.checkbox("series_include_tmdb_id")
+        CONFIG["series_include_country"] = self.series_tab.checkbox("series_include_country")
         CONFIG["series_include_episode_title"] = self.series_tab.checkbox("series_include_episode_title")
         CONFIG["series_download_show_poster"] = self.series_tab.checkbox("series_download_show_poster")
         CONFIG["series_download_season_poster"] = self.series_tab.checkbox("series_download_season_poster")

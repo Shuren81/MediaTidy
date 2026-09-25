@@ -130,7 +130,11 @@ def build_show_folder(show_info, cap_rule=None):
     title_mode = CONFIG.get("series_title_mode", "orig_loc")
     titolo = format_title(show_info.get("original"), show_info.get("english_or_local"), cap_rule, title_mode)
     year = show_info.get("year") or "XXXX"
-    base = f"{titolo} ({year})"
+    if CONFIG.get("series_include_country", True):
+        country = sanitize_title(show_info.get("country") or "XX", fix_apos=False)
+        base = f"{titolo} ({country}, {year})"
+    else:
+        base = f"{titolo} ({year})"
     # Nota: se "series_include_tmdb_id" è disattivato, serie omonime con lo stesso
     # anno finiscono nella stessa cartella (scelta esplicita da Formato Nomi).
     if CONFIG.get("series_include_tmdb_id", True):
@@ -492,10 +496,10 @@ class SeriesWorker(QThread):
 
         if self.clean_parent and self.action == "move":
             self._cleanup_dirs.setdefault(src_parent, i)
-            # Registra anche la cartella "genitore" che hai trascinato tu (es. la
+            # Registra anche la cartella "genitore" che l'utente ha trascinato (es. la
             # cartella della serie, sopra le sottocartelle Season NN), non solo la
-            # cartella immediata del file: altrimenti resta fuori dalla pulizia,
-            # senza calcolo né prompt, anche se svuotata di tutte le sue stagioni.
+            # cartella immediata del file: altrimenti resta fuori dalla pulizia, senza
+            # calcolo né prompt, anche se svuotata di tutte le sue stagioni.
             release_dir = it.get("release_dir")
             if release_dir:
                 release_dir = release_dir.resolve()

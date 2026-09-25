@@ -66,6 +66,7 @@ STRINGS = {
         "movie_include_director": "Includi il regista nel nome della cartella",
         "movie_download_poster": "Scarica il poster nella cartella di destinazione",
         "series_include_tmdb_id": "Includi l'ID TMDB nel nome della cartella della serie",
+        "series_include_country": "Includi il paese di produzione (nel formato: Titolo (Paese, Anno))",
         "series_tmdb_id_note": "Se disattivato, serie omonime con lo stesso anno potrebbero finire nella stessa cartella.",
         "series_include_episode_title": "Includi il titolo dell'episodio nel nome del file",
         "series_download_show_poster": "Scarica il poster della serie",
@@ -89,6 +90,7 @@ STRINGS = {
         "btn_yes": "Sì, elimina",
         "btn_yes_to_all": "Sì per tutte",
         "btn_no": "No, salta",
+        "btn_open_folder": "Apri cartella",
 
         "search_btn": "Cerca",
         "skip_file": "Salta questo file",
@@ -173,6 +175,7 @@ STRINGS = {
         "series_status_unknown_ep": "Episodio non riconosciuto",
         "series_status_clip_skipped": "Ignorato (sample/trailer)",
         "series_add_release": "Aggiungi release…",
+        "series_apply_release_chk": "Applica anche agli altri episodi di questa release",
 
         # --- Triage automatico Film/Serie ---
         "ambiguous_title": "Film o Serie TV?",
@@ -238,6 +241,7 @@ STRINGS = {
         "movie_include_director": "Include the director in the folder name",
         "movie_download_poster": "Download the poster into the destination folder",
         "series_include_tmdb_id": "Include the TMDB ID in the show's folder name",
+        "series_include_country": "Include the production country (format: Title (Country, Year))",
         "series_tmdb_id_note": "If disabled, same-named shows with the same year may end up in the same folder.",
         "series_include_episode_title": "Include the episode title in the filename",
         "series_download_show_poster": "Download the show poster",
@@ -261,6 +265,7 @@ STRINGS = {
         "btn_yes": "Yes, delete",
         "btn_yes_to_all": "Yes to all",
         "btn_no": "No, skip",
+        "btn_open_folder": "Open folder",
 
         "search_btn": "Search",
         "skip_file": "Skip this file",
@@ -345,6 +350,7 @@ STRINGS = {
         "series_status_unknown_ep": "Episode not recognized",
         "series_status_clip_skipped": "Ignored (sample/trailer)",
         "series_add_release": "Add release…",
+        "series_apply_release_chk": "Also apply to other episodes in this release",
 
         # --- Automatic Movie/Series triage ---
         "ambiguous_title": "Movie or TV Series?",

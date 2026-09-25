@@ -20,7 +20,7 @@ from ui.widgets import (
     NonEmptyDirDialog, ToggleableListWidget,
 )
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import QColor, QCursor
 from qtpy.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
@@ -99,6 +99,8 @@ MOVIE_HEADERS = ["movie_col_orig", "movie_col_new", "movie_col_dest", "movie_col
 
 
 class MovieTab(QWidget):
+    items_changed = Signal()  # numero di item cambiato: la finestra aggiorna il conteggio in tab
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.items = []
@@ -260,6 +262,7 @@ class MovieTab(QWidget):
         })
         self.table.insertRow(self.table.rowCount())
         self.refresh_row(len(self.items) - 1)
+        self.items_changed.emit()
 
     def known_paths(self):
         return {it["path"] for it in self.items}
@@ -486,6 +489,7 @@ class MovieTab(QWidget):
         self.btn_exec_sel.setEnabled(not busy and n_ready_sel > 0)
         self.btn_exec_all.setText(f"{action_word} {tr('exec_all_suffix', n=n_ready_all)}")
         self.btn_exec_all.setEnabled(not busy and n_ready_all > 0)
+        self.items_changed.emit()
 
     def update_buttons_busy(self):
         for b in (self.btn_test, self.btn_exec_sel, self.btn_exec_all, *self._action_buttons()):
@@ -556,7 +560,7 @@ class MovieTab(QWidget):
     def on_ask_duplicate(self, row):
         self.table.selectRow(row)
         it = self.items[row]
-        dlg = DuplicateDialog(it["folder"], it["newname"], self)
+        dlg = DuplicateDialog(it["folder"], it["newname"], dest=CONFIG["dest_movies"], parent=self)
         if dlg.exec_() == QDialog.Accepted:
             if dlg.choice == "custom" and not self._edit_custom_dialog(row, allow_reset=False):
                 self.worker.provide_dup_choice("skip", False)
