@@ -4,14 +4,66 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
-## [0.6.1] - 2026-09-25
+## [0.7.1] - 2026-09-26
 
 ### Aggiunto
 
-- Il nome di ciascuna scheda mostra ora anche il numero totale di file
-  importati, es. "Film (12)" / "Serie TV (34)" — aggiornato in tempo reale
-  ad ogni aggiunta o rimozione, sia dal drag&drop sia dal triage automatico,
-  e coerente anche dopo un cambio di lingua interfaccia.
+- Il codice TMDB già scritto nel nome di un file o di una cartella (formato
+  `{tmdb-ID}`, quello che MediaTidy stesso usa) viene ora riconosciuto in
+  automatico non appena il file viene aggiunto alla lista: il Test salta
+  direttamente al recupero dei dettagli, senza rifare una ricerca e senza
+  chiedere conferma. Per i film cerca nel file e nella cartella che lo
+  contiene; per le serie anche nella cartella "nonna" (la cartella della
+  serie, sopra Season NN), dove MediaTidy scrive il codice.
+
+### Corretto
+
+- La checkbox "Applica anche agli altri episodi di questa release" (v0.6.0)
+  ora richiede anche che il nome di serie indovinato sia simile, non solo che
+  la cartella di origine sia la stessa: se in un'unica cartella trascinata
+  convivono più serie diverse non ancora organizzate, confermarne una non
+  scrive più per errore lo stesso codice TMDB sugli episodi delle altre.
+
+## [0.7.0] - 2026-09-26
+
+### Aggiunto
+
+- Il nome di ciascuna scheda mostra ora anche quanti file sono pronti, es.
+  "Film (12, 8 pronti)".
+- Etichetta con la dimensione totale da spostare/copiare (somma dei file
+  "pronti") e lo spazio libero sul disco di destinazione, accanto ai bottoni
+  Esegui — non disponibile per destinazioni remote (SSH).
+- Il bottone **Test** mostra ora anche lui il conteggio, come i bottoni
+  Esegui: "Test tutto (N)" senza selezione, "Test N sel." con una selezione
+  attiva — ed è disabilitato quando quel conteggio è zero.
+- Bottone/scorciatoia **"Inverti selezione"** (Ctrl+I) accanto a Ctrl+A.
+- **Copia percorso di origine** e **Copia percorso di destinazione previsto**
+  nel menu contestuale (quest'ultimo solo se il nome/cartella di destinazione
+  sono già stati calcolati).
+- Il tooltip sulla colonna "Cartella di destinazione" mostra ora il percorso
+  assoluto completo (destinazione + cartella), non solo il testo già
+  visibile in cella.
+
+## [0.6.2] - 2026-09-25
+
+### Corretto
+
+- **Bug di sicurezza**: se un file video si trovava direttamente nella "radice"
+  di una cartella trascinata (non in una sottocartella), la pulizia della
+  cartella di origine proponeva di cancellare l'INTERA cartella radice — che
+  poteva contenere qualunque altro contenuto non correlato (altre
+  sottocartelle, documenti, foto...). Una prima correzione troppo prudente
+  impediva la pulizia di QUALSIASI cartella con sottocartelle residue, ma
+  questo bloccava anche un caso legittimo e comune: release con una
+  sottocartella "Screens" (o Sample, Subs, Proof...) accanto al file video.
+  La regola definitiva: una cartella con sottocartelle residue viene ancora
+  proposta per la cancellazione (con conferma) solo se TUTTE quelle
+  sottocartelle hanno un nome riconosciuto come "di scarto" di una release
+  scene (sample, screens, screenshots, proof, subs, subtitles, extras,
+  featurettes, artwork, covers, scans — corrispondenza esatta,
+  case-insensitive); se anche una sola sottocartella ha un nome diverso, la
+  cartella non viene mai più proposta, nemmeno con conferma. Il caso
+  legittimo delle stagioni (Season 01, Season 02...) resta invariato.
 
 ## [0.6.0] - 2026-09-25
 

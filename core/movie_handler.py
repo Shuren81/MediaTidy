@@ -15,10 +15,10 @@ from pathlib import Path
 from config import CONFIG
 from localization import tr
 from media_operations import (
-    VIDEO_EXT, cleanup_old_logs, download_poster, find_fstab_mountpoint,
-    get_dir_size, format_size, is_inplace_source, is_remote, is_same_file,
-    log_csv_row, log_event, mount_share, move_or_copy_file, target_exists,
-    unmount_share,
+    JUNK_SUBFOLDER_NAMES, VIDEO_EXT, cleanup_old_logs, download_poster,
+    find_fstab_mountpoint, get_dir_size, format_size, is_inplace_source, is_remote,
+    is_same_file, log_csv_row, log_event, mount_share, move_or_copy_file,
+    target_exists, unmount_share,
 )
 from text_utils import format_title, sanitize_title
 from tmdb_client import get_movie_details_by_id, search_movie
@@ -379,6 +379,16 @@ class MovieWorker(QThread):
                     folder.rmdir()
                     log_event("INFO", f"[Film] Cartella di origine vuota rimossa: {folder}")
                     continue
+                if any(child.is_dir() for child in folder.iterdir()):
+                    subdirs = [child for child in folder.iterdir() if child.is_dir()]
+                    unknown = [c.name for c in subdirs if c.name.lower() not in JUNK_SUBFOLDER_NAMES]
+                    if unknown:
+                        # Almeno una sottocartella non è tra quelle "di scarto" note di una
+                        # release (Screens, Sample, Subs...): quasi certamente contenuto non
+                        # correlato (un'altra cartella della libreria). Non la proponiamo MAI
+                        # in cancellazione, nemmeno con conferma.
+                        log_event("INFO", f"[Film] Cartella di origine conservata (sottocartelle non riconosciute: {unknown}): {folder}")
+                        continue
                 choice = self._ask_non_empty_dir(row, str(folder), format_size(get_dir_size(folder)))
                 if choice == "yes":
                     shutil.rmtree(folder)

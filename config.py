@@ -15,7 +15,7 @@ from pathlib import Path
 from qtpy.QtCore import QSettings
 
 APP_NAME = "MediaTidy"
-VERSION = "0.6.1"
+VERSION = "0.7.1"
 
 DEFAULT_LOGS_DIR = str(Path.home() / ".local" / "share" / "MediaTidy" / "logs")
 

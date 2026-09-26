@@ -21,9 +21,36 @@ import requests
 from config import CONFIG
 
 VIDEO_EXT = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".wmv", ".mpg", ".mpeg", ".ts"}
+
+# Nomi di sottocartelle "di scarto" tipiche di una release scene (corrispondenza
+# esatta, case-insensitive): se TUTTE le sottocartelle rimaste in una cartella di
+# origine hanno uno di questi nomi, la pulizia può ancora proporla (con conferma);
+# se anche una sola sottocartella ha un nome diverso, la cartella non viene mai
+# più proposta (vedi _cleanup_source_dirs in movie_handler.py/series_handler.py).
+JUNK_SUBFOLDER_NAMES = frozenset({
+    "sample", "screens", "screenshots", "proof", "subs", "subtitles",
+    "extras", "featurettes", "artwork", "covers", "scans",
+})
 COPY_CHUNK = 4 * 1024 * 1024
 
 LOG_RETENTION_DAYS = 10
+
+_TMDB_ID_RE = re.compile(r"\{tmdb-(\d+)\}", re.I)
+
+
+def extract_tmdb_id(*names):
+    """Cerca un codice {tmdb-XXXX} in una sequenza di nomi (es. file, cartella
+    genitore, cartella nonna...), nell'ordine dato. Ritorna la stringa dell'ID
+    trovato per primo, o None se nessuno dei nomi lo contiene. Usato per
+    riconoscere in automatico un file/cartella già rinominato da MediaTidy
+    (o comunque nel formato "{tmdb-ID}"), senza dover rifare la ricerca."""
+    for name in names:
+        if not name:
+            continue
+        m = _TMDB_ID_RE.search(str(name))
+        if m:
+            return m.group(1)
+    return None
 
 def get_log_dir():
     """Restituisce la cartella dei log configurata dall'utente."""

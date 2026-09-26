@@ -11,6 +11,8 @@ from config import CONFIG, VERSION, load_config, save_config
 from localization import tr
 from media_operations import get_log_dir
 from core.media_classifier import classify_paths, to_series_item
+from core.movie_handler import is_ready as movie_is_ready
+from core.series_handler import is_ready as series_is_ready
 from ui.movie_tab import MovieTab
 from ui.series_tab import SeriesTab
 from ui.settings_dialog import SettingsDialog
@@ -115,9 +117,13 @@ class MainWindow(QMainWindow):
         self.series_tab.retranslate_ui()
 
     def _update_tab_titles(self):
-        """Nome scheda + numero totale di file importati in quella scheda."""
-        self.tabs.setTabText(0, f"{tr('tab_movies')} ({len(self.movie_tab.items)})")
-        self.tabs.setTabText(1, f"{tr('tab_series')} ({len(self.series_tab.items)})")
+        """Nome scheda + numero totale di file importati e quanti sono pronti."""
+        n_movies = len(self.movie_tab.items)
+        n_movies_ready = sum(1 for it in self.movie_tab.items if movie_is_ready(it))
+        n_series = len(self.series_tab.items)
+        n_series_ready = sum(1 for it in self.series_tab.items if series_is_ready(it))
+        self.tabs.setTabText(0, f"{tr('tab_movies')} ({n_movies}, {n_movies_ready} {tr('tab_ready_suffix')})")
+        self.tabs.setTabText(1, f"{tr('tab_series')} ({n_series}, {n_series_ready} {tr('tab_ready_suffix')})")
 
     # ------------------------------------------------------------------ #
     #  Etichetta col nome del programma: stato del trascinamento

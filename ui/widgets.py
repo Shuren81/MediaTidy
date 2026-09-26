@@ -154,6 +154,20 @@ class ToggleableListWidget(QTableWidget):
         border_css = f"QTableWidget {{ border: 3px solid {color.name()}; }}" if color else ""
         self.setStyleSheet(self._base_style + border_css)
 
+    def invert_selection(self):
+        """Seleziona tutte le righe NON selezionate, deseleziona quelle che lo erano."""
+        from qtpy.QtWidgets import QTableWidgetSelectionRange
+        selected_rows = {i.row() for i in self.selectedIndexes()}
+        self.clearSelection()
+        if self.columnCount() == 0:
+            return
+        for r in range(self.rowCount()):
+            if r not in selected_rows:
+                self.setRangeSelected(QTableWidgetSelectionRange(r, 0, r, self.columnCount() - 1), True)
+
+    def _invert_selection(self):
+        self.invert_selection()
+
     def mousePressEvent(self, event):
         from qtpy.QtWidgets import QApplication
         index = self.indexAt(event.pos())
@@ -204,6 +218,10 @@ class ToggleableListWidget(QTableWidget):
             return
         if event.matches(QKeySequence.SelectAll):
             self.selectAll()
+            event.accept()
+            return
+        if event.key() == Qt.Key_I and event.modifiers() == Qt.ControlModifier:
+            self._invert_selection()
             event.accept()
             return
         super().keyPressEvent(event)

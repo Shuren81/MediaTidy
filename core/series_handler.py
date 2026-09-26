@@ -19,9 +19,10 @@ from pathlib import Path
 from config import CONFIG
 from localization import tr
 from media_operations import (
-    cleanup_old_logs, find_fstab_mountpoint, get_dir_size, format_size,
-    is_inplace_source, is_remote, is_same_file, log_csv_row, log_event,
-    mount_share, move_or_copy_file, target_exists, unmount_share,
+    JUNK_SUBFOLDER_NAMES, cleanup_old_logs, extract_tmdb_id, find_fstab_mountpoint,
+    get_dir_size, format_size, is_inplace_source, is_remote, is_same_file,
+    log_csv_row, log_event, mount_share, move_or_copy_file, target_exists,
+    unmount_share,
 )
 from text_utils import format_title, sanitize_title
 from tmdb_client import get_episode_title, get_tv_details_by_id, search_tv
@@ -64,7 +65,21 @@ def scan_path_for_episodes(path):
 
 
 def make_item(info, abs_path, release_dir):
+    """Il codice TMDB, per una serie, sta nella cartella della serie stessa —
+    che per un episodio è la cartella "nonna" (Serie {tmdb-ID}/Season NN/file.mkv).
+    Lo cerchiamo risalendo file -> genitore (Season NN) -> nonno (Serie), così un
+    file già organizzato da MediaTidy (o rinominato a mano nello stesso formato)
+    viene riconosciuto subito, senza rifare la ricerca."""
     recognized = bool(info.season and info.episodes)
+    parent = abs_path.parent
+    grandparent = parent.parent if parent != parent.parent else None
+    tmdb_id = extract_tmdb_id(abs_path.name, parent.name, grandparent.name if grandparent else None) or ""
+    if tmdb_id:
+        status, status_detail = "status_id_tmdb", ""
+    elif recognized:
+        status, status_detail = "status_to_test", ""
+    else:
+        status, status_detail = "series_status_unknown_ep", info.reason
     return {
         "path": abs_path,
         "release_dir": release_dir,
@@ -72,14 +87,14 @@ def make_item(info, abs_path, release_dir):
         "episodes": info.episodes,
         "show_guess": info.show,
         "year_guess": info.year,
-        "tmdb_id": "",
+        "tmdb_id": tmdb_id,
         "tmdb_original": "",
         "tmdb_localized": "",
         "tmdb_year": "",
         "folder": "",
         "newname": "",
-        "status": "status_to_test" if recognized else "series_status_unknown_ep",
-        "status_detail": "" if recognized else info.reason,
+        "status": status,
+        "status_detail": status_detail,
         "poster_path": None,
         "custom_override": False,
         "force_overwrite": False,
@@ -359,6 +374,16 @@ class SeriesWorker(QThread):
                     folder.rmdir()
                     log_event("INFO", f"[Serie] Cartella di origine vuota rimossa: {folder}")
                     continue
+                if any(child.is_dir() for child in folder.iterdir()):
+                    subdirs = [child for child in folder.iterdir() if child.is_dir()]
+                    unknown = [c.name for c in subdirs if c.name.lower() not in JUNK_SUBFOLDER_NAMES]
+                    if unknown:
+                        # Almeno una sottocartella non è tra quelle "di scarto" note di una
+                        # release (Screens, Sample, Subs...): quasi certamente un'altra stagione
+                        # non ancora elaborata o contenuto non correlato. Non la proponiamo MAI
+                        # in cancellazione, nemmeno con conferma.
+                        log_event("INFO", f"[Serie] Cartella di origine conservata (sottocartelle non riconosciute: {unknown}): {folder}")
+                        continue
                 choice = self._ask_non_empty_dir(row, str(folder), format_size(get_dir_size(folder)))
                 if choice == "yes":
                     shutil.rmtree(folder)

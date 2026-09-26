@@ -6,13 +6,18 @@ release, Test/Esegui (selezionati/tutti), dialogo di conferma TMDB, un unico dia
 non vuote. Usa core/series_handler.py per la logica.
 """
 from pathlib import Path
+import difflib
+import shutil
 
 from config import CONFIG
 from localization import tr
-from media_operations import play_system_sound, send_mint_notification
+from media_operations import format_size, is_remote, play_system_sound, send_mint_notification
 from text_utils import sanitize_title
 from tmdb_client import search_tv
-from core.movie_handler import DONE_KEYS, ERROR_KEYS, READY_KEYS, SKIP_KEYS, is_done, set_status, status_text
+from core.movie_handler import (
+    DONE_KEYS, ERROR_KEYS, READY_KEYS, SIMILARITY_THRESHOLD, SKIP_KEYS, is_done,
+    norm, set_status, status_text,
+)
 from core.series_handler import SeriesWorker, collect_items_for_path, is_ready, make_item
 from ui.widgets import (
     ITEM_ENABLED, ITEM_SELECTABLE, ROLE_USER, DuplicateDialog, NonEmptyDirDialog,
@@ -22,10 +27,10 @@ from ui.widgets import (
 from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import QColor, QCursor
 from qtpy.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox,
-    QProgressBar, QPushButton, QRadioButton, QSpinBox, QTableWidgetItem, QVBoxLayout,
-    QWidget,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
+    QMessageBox, QProgressBar, QPushButton, QRadioButton, QSpinBox, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 # Colonne su cui il doppio click apre "Modifica episodio e nome"
@@ -158,11 +163,18 @@ class SeriesTab(QWidget):
         self.progress_bar.setVisible(False)
         self.lay.addWidget(self.progress_bar)
 
+        self.size_row = QHBoxLayout()
+        self.lbl_size_info = QLabel()
+        self.size_row.addWidget(self.lbl_size_info)
+        self.size_row.addStretch(1)
+        self.lay.addLayout(self.size_row)
+
         self.row_btns = QHBoxLayout()
         self.btn_add_files = QPushButton()
         self.btn_add_dir = QPushButton()
         self.btn_remove = QPushButton()
         self.btn_clear = QPushButton()
+        self.btn_invert_sel = QPushButton()
         self.btn_test = QPushButton()
         self.btn_exec_sel = QPushButton()
         self.btn_exec_all = QPushButton()
@@ -171,11 +183,12 @@ class SeriesTab(QWidget):
         self.btn_add_dir.clicked.connect(self.pick_dir)
         self.btn_remove.clicked.connect(self.remove_selected)
         self.btn_clear.clicked.connect(self.clear_all)
+        self.btn_invert_sel.clicked.connect(self.table.invert_selection)
         self.btn_test.clicked.connect(lambda: self.start("test"))
         self.btn_exec_sel.clicked.connect(lambda: self.start("action", scope="selected"))
         self.btn_exec_all.clicked.connect(lambda: self.start("action", scope="all"))
 
-        for b in (self.btn_add_files, self.btn_add_dir, self.btn_remove, self.btn_clear):
+        for b in (self.btn_add_files, self.btn_add_dir, self.btn_remove, self.btn_clear, self.btn_invert_sel):
             self.row_btns.addWidget(b)
         self.row_btns.addStretch(1)
         self.row_btns.addWidget(self.btn_test)
@@ -202,7 +215,7 @@ class SeriesTab(QWidget):
         self.btn_add_dir.setText(tr("series_add_release"))
         self.btn_remove.setText(tr("remove_sel"))
         self.btn_clear.setText(tr("clear_all"))
-        self.btn_test.setText(tr("test"))
+        self.btn_invert_sel.setText(tr("invert_sel"))
         self.table.update_headers()
         for i in range(len(self.items)):
             self.refresh_row(i)
@@ -247,7 +260,7 @@ class SeriesTab(QWidget):
         return bool(self.worker and self.worker.isRunning())
 
     def _action_buttons(self):
-        return (self.btn_add_files, self.btn_add_dir, self.btn_remove, self.btn_clear)
+        return (self.btn_add_files, self.btn_add_dir, self.btn_remove, self.btn_clear, self.btn_invert_sel)
 
     def add_paths(self, paths):
         if self._busy():
@@ -296,10 +309,16 @@ class SeriesTab(QWidget):
         show_display = it.get("tmdb_localized") or it.get("show_guess") or ""
         cells = [it["path"].name, show_display, _ep_text(it), it["newname"],
                  it["folder"], it["tmdb_id"], status_text(it)]
+        dest_full_path = str(Path(CONFIG["dest_series"]) / it["folder"]) if it["folder"] else ""
         self.table.blockSignals(True)
         for c, text in enumerate(cells):
             cell = QTableWidgetItem(text)
-            cell.setToolTip(str(it["path"]) if c == 0 else text)
+            if c == 0:
+                cell.setToolTip(str(it["path"]))
+            elif c == 4 and dest_full_path:
+                cell.setToolTip(dest_full_path)
+            else:
+                cell.setToolTip(text)
             if c != 5:  # solo la colonna "Codice TMDB" è modificabile a mano
                 cell.setFlags(ITEM_ENABLED | ITEM_SELECTABLE)
             if c == 6:
@@ -347,6 +366,12 @@ class SeriesTab(QWidget):
         act_tmdb = menu.addAction(tr("ctx_tmdb"))
         act_lang = menu.addAction(tr("ctx_lang"))
 
+        menu.addSeparator()
+        act_copy_src = menu.addAction(tr("ctx_copy_src_path"))
+        act_copy_dest = None
+        if it.get("folder"):
+            act_copy_dest = menu.addAction(tr("ctx_copy_dest_path"))
+
         if it.get("status") == "status_already_exists":
             menu.addSeparator()
             act_overwrite = menu.addAction(tr("ctx_overwrite"))
@@ -367,6 +392,10 @@ class SeriesTab(QWidget):
             self._edit_tmdb_dialog(row)
         elif action == act_lang:
             self._change_lang_dialog(row)
+        elif action == act_copy_src:
+            QApplication.clipboard().setText(str(it["path"]))
+        elif act_copy_dest and action == act_copy_dest:
+            QApplication.clipboard().setText(str(Path(CONFIG["dest_series"]) / it["folder"] / it["newname"]))
         elif act_overwrite and action == act_overwrite:
             it["force_overwrite"] = True
             set_status(it, "status_ready_overwrite")
@@ -521,7 +550,6 @@ class SeriesTab(QWidget):
 
     def update_buttons(self, idle=False):
         busy = not idle and self._busy()
-        self.btn_test.setEnabled(not busy and bool(self.items))
         for b in self._action_buttons():
             b.setEnabled(not busy)
 
@@ -530,11 +558,39 @@ class SeriesTab(QWidget):
         n_ready_sel = sum(1 for i in selected_rows if is_ready(self.items[i]))
         action_word = tr("action_move_short") if CONFIG.get("action_series", "move") == "move" else tr("action_copy_short")
 
+        if selected_rows:
+            n_test = sum(1 for i in selected_rows if not is_done(self.items[i]))
+            self.btn_test.setText(f"{tr('test')} {tr('exec_sel_suffix', n=n_test)}")
+        else:
+            n_test = sum(1 for it in self.items if not is_done(it))
+            self.btn_test.setText(f"{tr('test')} {tr('exec_all_suffix', n=n_test)}")
+        self.btn_test.setEnabled(not busy and n_test > 0)
+
         self.btn_exec_sel.setText(f"{action_word} {tr('exec_sel_suffix', n=n_ready_sel)}")
         self.btn_exec_sel.setEnabled(not busy and n_ready_sel > 0)
         self.btn_exec_all.setText(f"{action_word} {tr('exec_all_suffix', n=n_ready_all)}")
         self.btn_exec_all.setEnabled(not busy and n_ready_all > 0)
+        self._update_size_info()
         self.items_changed.emit()
+
+    def _update_size_info(self):
+        total = 0
+        for it in self.items:
+            if is_ready(it):
+                try:
+                    total += it["path"].stat().st_size
+                except OSError:
+                    pass
+        dest = CONFIG.get("dest_series", "")
+        free_txt = "—"
+        if dest and not is_remote(dest):
+            try:
+                if Path(dest).exists():
+                    free_txt = format_size(shutil.disk_usage(dest).free)
+            except OSError:
+                pass
+        key = "size_info_move" if CONFIG.get("action_series", "move") == "move" else "size_info_copy"
+        self.lbl_size_info.setText(tr(key, size=format_size(total), free=free_txt))
 
     def update_buttons_busy(self):
         for b in (self.btn_test, self.btn_exec_sel, self.btn_exec_all, *self._action_buttons()):
@@ -600,7 +656,9 @@ class SeriesTab(QWidget):
         self.table.selectRow(row)
         release_dir = self.items[row].get("release_dir")
         has_siblings = bool(release_dir) and any(
-            j != row and self.items[j].get("release_dir") == release_dir and not self.items[j].get("tmdb_id")
+            j != row and self.items[j].get("release_dir") == release_dir
+            and not self.items[j].get("tmdb_id")
+            and self._guess_similarity(row, j) >= SIMILARITY_THRESHOLD
             for j in range(len(self.items))
         )
         dlg = TvChoiceDialog(guessed, results, self, lang=self.items[row].get("lang"),
@@ -613,9 +671,20 @@ class SeriesTab(QWidget):
             choice = None
         self.worker.provide(choice)
 
+    def _guess_similarity(self, i, j):
+        """Somiglianza tra i nomi di serie indovinati per due item (0.0-1.0):
+        stessa cartella trascinata NON basta per considerarli la stessa serie
+        (potrebbe contenerne più di una, ognuna organizzata a modo suo)."""
+        a = norm(self.items[i].get("show_guess") or "")
+        b = norm(self.items[j].get("show_guess") or "")
+        if not a or not b:
+            return 0.0
+        return difflib.SequenceMatcher(None, a, b).ratio()
+
     def _propagate_tmdb_id(self, row, tmdb_id):
         """Scrive lo stesso codice TMDB sugli altri item non ancora testati che
-        condividono lo stesso release_dir (stessa cartella trascinata dall'utente),
+        condividono lo stesso release_dir E un nome di serie indovinato simile
+        (non basta la sola cartella: potrebbe contenerne più di una diversa),
         per evitare un popup di conferma per ogni episodio di una release già
         organizzata Serie/Stagione/Episodio. Sicuro: il Worker resta bloccato in
         attesa di questa risposta, nessun altro thread tocca self.items nel frattempo."""
@@ -624,6 +693,8 @@ class SeriesTab(QWidget):
             return
         for j, it in enumerate(self.items):
             if j == row or it.get("release_dir") != release_dir or it.get("tmdb_id"):
+                continue
+            if self._guess_similarity(row, j) < SIMILARITY_THRESHOLD:
                 continue
             it["tmdb_id"] = tmdb_id
             self.refresh_row(j)
