@@ -4,6 +4,27 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
+## [0.7.2] - 2026-09-26
+
+### Aggiunto
+
+- I file per generare l'AppImage (`AppImage/build_appimage.sh`,
+  `AppImage/MediaTidy.desktop`) sono ora versionati nel repository, insieme
+  al resto del codice — non sono file generati, quindi non rientrano tra
+  quelli esclusi da `.gitignore` (`build/`, `dist/`, `tools/` restano invece
+  locali, come già documentato nel `README`).
+
+### Corretto
+
+- Lo script di build dell'AppImage non includeva `MT_Icon.png` nel bundle
+  PyInstaller: essendo un file letto solo a runtime da percorso (non un
+  modulo importato), PyInstaller non lo raccoglieva in automatico. L'app
+  avrebbe continuato a funzionare (nessun crash: il codice ha già un
+  fallback silenzioso se l'icona manca), ma l'icona personalizzata della
+  finestra introdotta in v0.6.0 sarebbe sparita, tornando all'icona di
+  default, solo nella versione AppImage. Aggiunta `--add-data` allo script
+  per includerla esplicitamente.
+
 ## [0.7.1] - 2026-09-26
 
 ### Aggiunto
