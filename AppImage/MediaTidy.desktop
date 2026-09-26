@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=MediaTidy
+Comment=Rinomina e organizza film e serie TV con TMDB
+Exec=MediaTidy
+Icon=MediaTidy
+Terminal=false
+Categories=Utility;
+StartupNotify=true
