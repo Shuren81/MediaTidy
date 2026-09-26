@@ -13,6 +13,7 @@ l'utente non lo corregge manualmente (mai una decisione presa in silenzio).
 """
 import difflib
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -201,6 +202,13 @@ class SeriesWorker(QThread):
         self.default_non_empty_action = None
         self._cleanup_dirs = {}
 
+        self.total_bytes = 0
+        self.elapsed = 0.0
+        self.succeeded_count = 0
+        self.skipped_count = 0
+        self.error_count = 0
+        self.result_details = []  # [{"name", "status", "message"}, ...]
+
     def provide(self, show):
         self._answer = show
         self._evt.set()
@@ -270,6 +278,7 @@ class SeriesWorker(QThread):
     def run(self):
         cleanup_old_logs()
         log_event("INFO", f"[Serie] Avvio esecuzione: modalità={self.mode}, azione={self.action}, file in coda={len(self.rows)}")
+        start_time = time.monotonic()
         try:
             self._prepare()
         except Exception as e:
@@ -277,7 +286,6 @@ class SeriesWorker(QThread):
             self.error.emit(str(e))
             return
         total = len(self.rows)
-        succeeded = skipped = errors = 0
         for n, i in enumerate(self.rows, 1):
             it = self.items[i]
             self.progress.emit(n, total)
@@ -290,12 +298,21 @@ class SeriesWorker(QThread):
                 set_status(it, "status_error", str(e))
                 log_event("ERROR", f"[Serie] {it.get('path', '')}: {e}")
             key = it.get("status", "")
-            if key in ERROR_KEYS:
-                errors += 1
-            elif key in SKIP_KEYS:
-                skipped += 1
-            elif self.mode == "action" and key in DONE_KEYS:
-                succeeded += 1
+            if self.mode == "action":
+                if key in ERROR_KEYS:
+                    self.error_count += 1
+                    self.result_details.append({
+                        "name": it["path"].name, "status": tr(key),
+                        "message": it.get("status_detail") or tr(key),
+                    })
+                elif key in SKIP_KEYS:
+                    self.skipped_count += 1
+                    self.result_details.append({
+                        "name": it["path"].name, "status": tr(key),
+                        "message": it.get("status_detail") or tr(key),
+                    })
+                elif key in DONE_KEYS:
+                    self.succeeded_count += 1
             text = status_text(it)
             log_event("INFO", f"[Serie] File={it.get('path', '')} | Nuovo nome={it.get('newname', '')} | Cartella={it.get('folder', '')} | Stato={text}")
             now = datetime.now().astimezone().isoformat(timespec="seconds")
@@ -322,7 +339,8 @@ class SeriesWorker(QThread):
                 self.unmounted.emit()
             except Exception as e:
                 self.status.emit(f"Smontaggio non riuscito: {e}")
-        log_event("INFO", f"[Serie] Fine esecuzione: elaborati={total}, riusciti={succeeded}, saltati={skipped}, errori={errors}")
+        self.elapsed = time.monotonic() - start_time
+        log_event("INFO", f"[Serie] Fine esecuzione: elaborati={total}, riusciti={self.succeeded_count}, saltati={self.skipped_count}, errori={self.error_count}")
         self.all_done.emit()
 
     def _has_pending_files(self, folder):
@@ -463,7 +481,10 @@ class SeriesWorker(QThread):
         elif target_ex:
             set_status(it, "status_already_exists")
         elif inplace:
-            set_status(it, "status_ready_inplace")
+            # Il file è già dentro l'albero di destinazione, ma nome/cartella calcolati
+            # non coincidono esattamente con quelli attuali: "Sposta" lo rinominerebbe
+            # davvero (non è un no-op come il caso sopra) — stato ed etichetta distinti.
+            set_status(it, "status_ready_inplace_rename")
         else:
             set_status(it, "status_ready")
 
@@ -501,13 +522,17 @@ class SeriesWorker(QThread):
         self.row_update.emit(i)
 
         src_parent = Path(it["path"]).parent.resolve()
+        try:
+            src_size = Path(it["path"]).stat().st_size
+        except OSError:
+            src_size = 0
         move_or_copy_file(
             it["path"], dest, it["folder"], it["newname"],
             poster_path=it.get("poster_path"),
             action=self.action,
             progress_callback=self.file_progress.emit,
-		)
-        
+        )
+
         # Scarica poster della stagione dopo aver copiato/spostato il file.
         # it["folder"] è già "{cartella serie}/Season NN": nessun bisogno di ricostruirlo.
         if it.get("season_poster_path"):
@@ -518,6 +543,7 @@ class SeriesWorker(QThread):
             set_status(it, "status_done_inplace")
         else:
             set_status(it, "status_done_moved" if self.action == "move" else "status_done_copied")
+        self.total_bytes += src_size
 
         if self.clean_parent and self.action == "move":
             self._cleanup_dirs.setdefault(src_parent, i)

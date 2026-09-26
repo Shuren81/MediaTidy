@@ -227,6 +227,18 @@ def format_size(size_bytes):
     return f"{size_bytes:.2f} PB"
 
 
+def format_duration(seconds):
+    """Formatta una durata in secondi in una stringa breve tipo '38s', '4m 12s', '1h 05m'."""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m"
+
+
 def _rsync_to_remote(src_path, dest, folder, filename, action, report):
     host, remote_dir, _full = _remote_parts(dest, folder)
     subprocess.run(

@@ -8,15 +8,16 @@ sono in moduli propri.
 """
 from config import VERSION
 from localization import tr
-from media_operations import is_remote
+from media_operations import format_duration, format_size, is_remote
 
 from pathlib import Path
 
 from qtpy.QtCore import QUrl, Qt, QTimer, Signal
 from qtpy.QtGui import QColor, QDesktopServices, QKeySequence, QPainter
 from qtpy.QtWidgets import (
-    QCheckBox, QDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton,
-    QTableWidget, QTabWidget, QTextBrowser, QVBoxLayout, QWidget, QAbstractItemView,
+    QAbstractItemView, QApplication, QCheckBox, QDialog, QHBoxLayout, QHeaderView,
+    QLabel, QLineEdit, QMenu, QPushButton, QTableWidget, QTableWidgetItem,
+    QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 
@@ -362,3 +363,106 @@ class CreditsPrivacyDialog(QDialog):
         btn_close.clicked.connect(self.accept)
         lay.addWidget(btn_close)
 
+
+class BatchDetailsDialog(QDialog):
+    """Tabella con i file saltati/in errore di un batch Esegui: nome, stato,
+    messaggio. Copia riga singola o intero report, sia da bottone sia dal
+    menu contestuale (tasto destro)."""
+    def __init__(self, details, parent=None):
+        super().__init__(parent)
+        self.details = details
+        self.setWindowTitle(tr("batch_details_title"))
+        self.resize(720, 420)
+
+        lay = QVBoxLayout(self)
+
+        self.table = QTableWidget(len(details), 3)
+        self.table.setHorizontalHeaderLabels(
+            [tr("batch_col_name"), tr("batch_col_status"), tr("batch_col_message")]
+        )
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        for i, d in enumerate(details):
+            self.table.setItem(i, 0, QTableWidgetItem(d["name"]))
+            self.table.setItem(i, 1, QTableWidgetItem(d["status"]))
+            self.table.setItem(i, 2, QTableWidgetItem(d["message"]))
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_context_menu)
+        lay.addWidget(self.table)
+
+        btn_row = QHBoxLayout()
+        self.btn_copy_row = QPushButton(tr("batch_copy_row"))
+        self.btn_copy_row.clicked.connect(self._copy_selected_rows)
+        self.btn_copy_all = QPushButton(tr("batch_copy_all"))
+        self.btn_copy_all.clicked.connect(self._copy_all)
+        btn_row.addWidget(self.btn_copy_row)
+        btn_row.addWidget(self.btn_copy_all)
+        btn_row.addStretch(1)
+        btn_close = QPushButton(tr("ok"))
+        btn_close.clicked.connect(self.accept)
+        btn_row.addWidget(btn_close)
+        lay.addLayout(btn_row)
+
+    def _row_text(self, r):
+        return " | ".join(self.table.item(r, c).text() for c in range(self.table.columnCount()))
+
+    def _copy_selected_rows(self):
+        rows = sorted({i.row() for i in self.table.selectedIndexes()})
+        if not rows:
+            return
+        QApplication.clipboard().setText("\n".join(self._row_text(r) for r in rows))
+
+    def _copy_all(self):
+        QApplication.clipboard().setText("\n".join(self._row_text(r) for r in range(self.table.rowCount())))
+
+    def _show_context_menu(self, pos):
+        row = self.table.rowAt(pos.y())
+        menu = QMenu(self)
+        act_copy_row = menu.addAction(tr("batch_copy_row"))
+        act_copy_all = menu.addAction(tr("batch_copy_all"))
+        exec_func = getattr(menu, "exec_", None) or getattr(menu, "exec")
+        action = exec_func(self.table.viewport().mapToGlobal(pos))
+        if action == act_copy_row:
+            if row >= 0:
+                self.table.selectRow(row)
+            self._copy_selected_rows()
+        elif action == act_copy_all:
+            self._copy_all()
+
+
+class BatchSummaryDialog(QDialog):
+    """Riepilogo di fine batch (solo dopo Esegui, mai dopo Test): quanti file
+    spostati/copiati, dimensione totale, tempo impiegato, quanti saltati e
+    quanti in errore. "Vedi dettagli" apre BatchDetailsDialog con l'elenco
+    di tutto ciò che NON è stato spostato/copiato con successo."""
+    def __init__(self, succeeded, total_bytes, elapsed, skipped, errors, details, parent=None):
+        super().__init__(parent)
+        self.details = details
+        self.setWindowTitle(tr("batch_summary_title"))
+        self.resize(460, 160)
+
+        lay = QVBoxLayout(self)
+        msg = tr("batch_summary_msg", succeeded=succeeded, size=format_size(total_bytes),
+                 elapsed=format_duration(elapsed), skipped=skipped, errors=errors)
+        lbl = QLabel(msg)
+        lbl.setWordWrap(True)
+        lay.addWidget(lbl)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        if details:
+            btn_details = QPushButton(tr("batch_view_details"))
+            btn_details.clicked.connect(self._show_details)
+            btn_row.addWidget(btn_details)
+        btn_ok = QPushButton(tr("ok"))
+        btn_ok.clicked.connect(self.accept)
+        btn_row.addWidget(btn_ok)
+        lay.addLayout(btn_row)
+
+    def _show_details(self):
+        dlg = BatchDetailsDialog(self.details, self)
+        dlg.exec_()

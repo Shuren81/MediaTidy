@@ -4,6 +4,39 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
+## [1.0.1] - 2026-09-26
+
+### Corretto
+
+- Lo stato verde "Pronto (In-Place)" copriva in realtà due situazioni
+  diverse senza distinguerle: un file già esattamente al suo posto (nome e
+  cartella coincidenti al 100%, "Sposta" non farebbe nulla) e un file
+  dentro l'albero di destinazione ma con nome/cartella calcolati diversi
+  da quelli attuali ("Sposta" lo rinominerebbe davvero). Ora sono due stati
+  distinti — **"Pronto (già a posto)"** (verde) e **"Pronto (verrà
+  rinominato)"** (arancione) — così il colpo d'occhio in tabella dice
+  davvero cosa succederà, senza dover confrontare a mano i percorsi.
+
+## [1.0.0] - 2026-09-26
+
+Prima versione considerata feature-complete.
+
+### Aggiunto
+
+- **Riepilogo di fine batch**, dopo ogni Esegui (mai dopo Test): un popup
+  mostra quanti file sono stati spostati/copiati con successo, la
+  dimensione totale, il tempo impiegato, e quanti file sono stati saltati o
+  hanno dato errore. Contano come "saltati" sia le scelte deliberate
+  (Salta durante la conferma duplicati) sia i file già segnati come
+  "esistenti a destinazione" prima ancora di partire — questi ultimi non
+  passano mai dal Worker, quindi vengono recuperati dalla scheda in base
+  all'ambito effettivamente cliccato (selezionati o tutti).
+- Bottone **"Vedi dettagli"** nel popup (assente se non ci sono saltati/
+  errori): apre una finestra con una tabella File/Stato/Messaggio per
+  ciascun file non spostato/copiato con successo, con **copia riga** e
+  **copia tutto il report**, disponibili sia da bottone sia dal menu
+  contestuale (tasto destro) sulla tabella.
+
 ## [0.7.2] - 2026-09-26
 
 ### Aggiunto

@@ -20,8 +20,8 @@ from core.movie_handler import (
 )
 from core.series_handler import SeriesWorker, collect_items_for_path, is_ready, make_item
 from ui.widgets import (
-    ITEM_ENABLED, ITEM_SELECTABLE, ROLE_USER, DuplicateDialog, NonEmptyDirDialog,
-    ToggleableListWidget,
+    ITEM_ENABLED, ITEM_SELECTABLE, ROLE_USER, BatchSummaryDialog, DuplicateDialog,
+    NonEmptyDirDialog, ToggleableListWidget,
 )
 
 from qtpy.QtCore import Qt, Signal
@@ -131,6 +131,7 @@ class SeriesTab(QWidget):
         self.items = []
         self.worker = None
         self.mounted_by_us = None
+        self._last_candidates = []
 
         self.lay = QVBoxLayout(self)
 
@@ -322,7 +323,9 @@ class SeriesTab(QWidget):
             if c != 5:  # solo la colonna "Codice TMDB" è modificabile a mano
                 cell.setFlags(ITEM_ENABLED | ITEM_SELECTABLE)
             if c == 6:
-                if key in READY_KEYS or key in DONE_KEYS:
+                if key == "status_ready_inplace_rename":
+                    cell.setForeground(QColor(200, 130, 0))  # arancione: verrà rinominato, non è un no-op
+                elif key in READY_KEYS or key in DONE_KEYS:
                     cell.setForeground(QColor(0, 140, 0))
                 elif key in ERROR_KEYS or key in ("status_already_exists", "series_status_unknown_ep"):
                     cell.setForeground(QColor(200, 0, 0))
@@ -613,10 +616,13 @@ class SeriesTab(QWidget):
                 candidates = sorted({i.row() for i in self.table.selectedIndexes()})
             else:
                 candidates = range(len(self.items))
+            candidates = list(candidates)
             rows = [i for i in candidates if is_ready(self.items[i])]
 
         if not rows:
             return
+
+        self._last_candidates = candidates if mode == "action" else []
 
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -723,15 +729,39 @@ class SeriesTab(QWidget):
 
         if mode == "test":
             msg = tr("done_test", ready=ready)
+            self._show_status(msg)
         else:
             msg = tr("done_action", done=done)
             play_system_sound()
             send_mint_notification(tr("notif_title"), tr("notif_body", done=done))
+            if self.worker and self.worker.did_unmount:
+                msg += tr("unmounted_msg")
+            self._show_status(msg)
+            self._show_batch_summary()
 
-        if self.worker and self.worker.did_unmount:
-            msg += tr("unmounted_msg")
-        self._show_status(msg)
         self.update_buttons(idle=True)
+
+    def _show_batch_summary(self):
+        """Riepilogo di fine batch (solo dopo Esegui): il Worker traccia già i suoi
+        saltati/errori, ma i "già esistenti" (rossi) erano esclusi dal Worker fin
+        dall'inizio (mai entrati in rows) — li recupero qui da _last_candidates,
+        con lo stesso ambito (selezionati/tutti) che era stato cliccato."""
+        if not self.worker:
+            return
+        already_existing = [i for i in self._last_candidates
+                             if self.items[i].get("status") == "status_already_exists"]
+        extra_details = [
+            {"name": self.items[i]["path"].name, "status": tr("status_already_exists"),
+             "message": tr("status_already_exists")}
+            for i in already_existing
+        ]
+        skipped = self.worker.skipped_count + len(already_existing)
+        details = self.worker.result_details + extra_details
+        dlg = BatchSummaryDialog(
+            self.worker.succeeded_count, self.worker.total_bytes, self.worker.elapsed,
+            skipped, self.worker.error_count, details, self,
+        )
+        dlg.exec_()
 
     def on_error(self, msg):
         self.progress_bar.setVisible(False)
