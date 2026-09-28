@@ -4,6 +4,146 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
+## [1.0.8] - 2026-09-29
+
+### Corretto
+
+- La correzione della cartella introdotta in v1.0.7 usava `target_dir.exists()`
+  per decidere se c'era qualcosa da correggere — su un vero mount
+  case-insensitive (il caso reale dell'utente, NTFS via ntfs-3g) `.exists()`
+  risulta sempre vero anche chiedendolo con la scrittura sbagliata, perché il
+  sistema risolve il percorso ignorando le maiuscole. La funzione usciva
+  quindi subito convinta che non ci fosse nulla da fare, senza mai
+  correggere la cartella — il fix v1.0.7 non aveva quindi alcun effetto
+  reale sul filesystem dell'utente, nonostante funzionasse nei test
+  (costruiti, per errore, simulando due cartelle realmente distinte su un
+  filesystem case-sensitive anziché una singola voce di directory come
+  avviene davvero su un mount case-insensitive). Corretto affidandosi
+  sempre a `iterdir()` (che elenca la scrittura reale così com'è
+  memorizzata sul disco, indipendentemente da come la si interroga) invece
+  che a `.exists()`. Verificato questa volta anche con un test che replica
+  fedelmente il comportamento reale del mount, non solo con cartelle
+  distinte.
+
+## [1.0.7] - 2026-09-29
+
+### Corretto
+
+- Le correzioni maiuscole introdotte da v1.0.2 in poi rinominavano solo il
+  **file**, mai la **cartella** che lo contiene: quando la cartella esisteva
+  già con una scrittura diversa, `mkdir(..., exist_ok=True)` la accettava
+  silenziosamente senza correggerla. Risultato: un film già "sistemato" con
+  successo restava comunque segnalato "Pronto (verrà rinominato)" per
+  sempre ad ogni Test successivo — non c'era modo di farlo arrivare a
+  "già a posto", perché la cartella aveva davvero ancora bisogno di essere
+  corretta. Ora, prima di creare la cartella di destinazione, se ne esiste
+  già una nella stessa posizione con lo stesso nome a parte le maiuscole
+  viene rinominata alla scrittura corretta (stessa tecnica sicura del nome
+  temporaneo già usata per i file).
+  Nel verificare questa correzione con un test end-to-end reale (non solo
+  simulato) è emerso un secondo bug, introdotto dalla correzione stessa:
+  rinominare la cartella sposta anche il file al suo interno, ma il codice
+  non aggiornava il percorso del file già calcolato in memoria, tentando poi
+  di spostare un file che nel frattempo si era già spostato da solo insieme
+  alla cartella — corretto aggiornando il percorso subito dopo la rinomina
+  della cartella, prima di procedere.
+
+## [1.0.6] - 2026-09-29
+
+### Corretto
+
+- **Bug di sicurezza**: con "Pulisci la cartella di origine se rimane vuota"
+  attivo, una rinomina **sul posto** (il file resta nella stessa cartella —
+  sia il no-op "già a posto" sia la correzione automatica delle maiuscole
+  introdotta in v1.0.2) veniva comunque messa in coda per la pulizia di fine
+  batch, esattamente come un vero spostamento altrove. La cartella, non
+  essendo davvero vuota (contiene ancora il file appena rinominato più il
+  poster), faceva comparire il prompt "Cartella di origine non vuota" — e
+  confermando la cancellazione si sarebbe cancellato il file che si era
+  appena rinominato correttamente. La pulizia ora è registrata solo per i
+  file davvero spostati altrove, mai per una rinomina in-place di alcun
+  tipo. Vale sia per i film sia per le serie TV.
+
+## [1.0.5] - 2026-09-29
+
+### Corretto
+
+- Il poster veniva riscaricato da TMDB e riscritto su disco ad ogni
+  "Sposta/Copia", anche quando il file era già "Pronto (già a posto)" e non
+  c'era nulla da aggiornare — una chiamata di rete e una scrittura su disco
+  sprecate ad ogni esecuzione, per ogni film già a posto. Il download del
+  poster ora viene saltato proprio in questo caso (nessuna operazione da
+  fare sul file); resta invariato per un vero spostamento/copia o per una
+  rinomina in-place vera e propria (es. la correzione delle maiuscole),
+  dove il poster può davvero aver bisogno di essere scritto/aggiornato.
+
+## [1.0.4] - 2026-09-29
+
+### Corretto
+
+- Il fallback introdotto in v1.0.3 confrontava il nome del file ignorando le
+  maiuscole, ma la cartella genitore restava confrontata in modo sensibile
+  alle maiuscole — bastava che anche il nome della cartella cambiasse
+  scrittura insieme al file (il caso normale: la stessa regola di
+  capitalizzazione del titolo tocca sia la cartella sia il nome file) perché
+  il riconoscimento fallisse di nuovo, esattamente come confermato da un
+  log reale ("3 Men and a Little Lady" e "28 Years Later - The Bone Temple"
+  restavano entrambi segnati "Esiste già" nonostante il fix precedente). Il
+  confronto ora considera l'intero percorso (cartella e nome file insieme)
+  ignorando le maiuscole, non più solo il nome del file.
+
+## [1.0.3] - 2026-09-29
+
+### Corretto
+
+- Il riconoscimento "stesso file, solo maiuscole diverse" introdotto in v1.0.2
+  si basava solo su `os.path.samefile()` (confronto per inode) — su alcuni
+  mount **FUSE** (in particolare `ntfs-3g`, il driver più comune per montare
+  dischi NTFS/exFAT su Linux) questa funzione può restare inaffidabile e
+  restituire "no" anche quando è davvero lo stesso file, vanificando la
+  correzione precedente proprio nel caso reale per cui era stata scritta.
+  Aggiunto un fallback: quando `samefile()` non aiuta, considera lo stesso
+  file se nome (ignorando le maiuscole), cartella, dimensione e data di
+  modifica coincidono tutti — su un vero mount case-insensitive questi
+  coincidono sempre (è la stessa voce di directory), mentre due file
+  genuinamente diversi con lo stesso nome (maiuscole a parte) avrebbero
+  comunque bisogno di dimensione e istante di modifica identici, un caso
+  praticamente impossibile per coincidenza. Corretto anche un'inconsistenza
+  collegata: l'operazione di spostamento vera e propria e la copia "in-place"
+  chiamavano ciascuna `os.path.samefile()` per conto proprio invece di usare
+  la stessa funzione centralizzata — ora tutti e tre i punti (etichetta in
+  tabella, spostamento, copia in-place) usano la stessa logica, garantendo
+  lo stesso esito ovunque.
+
+## [1.0.2] - 2026-09-27
+
+### Corretto
+
+- **Bug di sicurezza**: su un filesystem case-insensitive (Windows/NTFS e
+  macOS/HFS+/APFS di norma; su Linux capita con dischi non nativi come
+  NTFS/exFAT montati via ntfs-3g/exfat-fuse) un file già rinominato da
+  MediaTidy ma con una scrittura diversa (es. maiuscole) veniva segnalato
+  per errore come "Esiste già" — perché il controllo "è lo stesso file?"
+  confrontava solo le stringhe del percorso, non chiedeva mai al sistema
+  operativo se puntassero allo stesso file fisico. Il problema andava oltre
+  l'etichetta sbagliata: la routine di rinomina, nel tentativo di sostituire
+  "un duplicato", cancellava la destinazione prima di spostarci sopra il
+  file — ma su questi filesystem la destinazione E la sorgente sono la
+  stessa identica voce, quindi il file veniva cancellato un istante prima
+  di provare a spostarlo. Non emerso prima perché lo stato "Esiste già"
+  bloccava l'operazione a monte, impedendo involontariamente che il bug
+  peggiore si manifestasse.
+  Corretto in due parti, entrambe multipiattaforma (nessuna dipendenza da
+  strumenti Linux-only, in vista del supporto a Windows/macOS): il
+  riconoscimento ora usa `os.path.samefile()` per chiedere all'OS se due
+  percorsi sono lo stesso file fisico, distinguendo questo caso (nuovo
+  stato "Pronto (verrà rinominato)") da un vero duplicato; la rinomina, per
+  questo caso specifico, passa da un nome temporaneo intermedio invece di
+  cancellare la destinazione, così la sorgente non viene mai persa.
+  Corretto anche un effetto collaterale minore: senza questa correzione,
+  eseguendo l'operazione su un file in questa situazione sarebbe comunque
+  comparso un popup di conferma duplicati non necessario.
+
 ## [1.0.1] - 2026-09-26
 
 ### Corretto

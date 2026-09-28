@@ -13,6 +13,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -166,13 +167,100 @@ def is_inplace_source(src_path, dest_base):
 
 
 def is_same_file(src_path, dest, folder, filename):
-    """True se il file sorgente è già esattamente nel percorso di destinazione finale."""
+    """True se il file sorgente è già esattamente nel percorso di destinazione finale
+    (stessa scrittura, maiuscole comprese): nessuna operazione da fare."""
     if not is_inplace_source(src_path, dest):
         return False
     try:
         return Path(src_path).resolve() == (Path(dest) / folder / filename).resolve()
     except OSError:
         return False
+
+
+def _ensure_correct_case_dir(target_dir):
+    """Se nella stessa cartella superiore esiste già una sottocartella con lo stesso
+    nome a parte le maiuscole, la rinomina alla scrittura corretta invece di lasciarla
+    con quella vecchia: mkdir(exist_ok=True) da solo accetterebbe silenziosamente la
+    cartella già esistente (su un filesystem case-insensitive) senza mai correggerne
+    le maiuscole, lasciando per sempre "qualcosa da rinominare" ad ogni Test successivo
+    anche dopo aver già corretto il file al suo interno.
+
+    Il controllo NON usa target_dir.exists(): su un vero filesystem case-insensitive
+    (Windows/macOS di norma, o NTFS/exFAT via ntfs-3g anche su Linux) .exists() risulta
+    sempre vero anche quando lo si chiede con la scrittura sbagliata, perché il sistema
+    risolve il percorso ignorando le maiuscole — un controllo su .exists() uscirebbe
+    subito convinto che non ci sia nulla da fare, lasciando la cartella con la grafia
+    vecchia per sempre. iterdir() invece elenca sempre i nomi così come sono REALMENTE
+    scritti sul disco, quale che sia la grafia con cui li si è cercati: è l'unico modo
+    affidabile per scoprire la scrittura attuale e capire se va corretta.
+
+    Solo locale (mai per destinazioni remote); non fa nulla se la scrittura è già
+    corretta o se la cartella superiore non esiste ancora (destinazione tutta nuova)."""
+    parent = target_dir.parent
+    if not parent.is_dir():
+        return False
+    try:
+        for child in parent.iterdir():
+            if not child.is_dir():
+                continue
+            if child.name == target_dir.name:
+                return False  # scrittura già corretta, niente da fare
+            if child.name.casefold() == target_dir.name.casefold():
+                tmp = child.with_name(f".{child.name}.mediatidy-tmp-{uuid.uuid4().hex[:8]}")
+                child.rename(tmp)
+                tmp.rename(target_dir)
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def _paths_are_same_physical_file(src_path, target_path):
+    """Confronto di basso livello, riusato sia da is_same_physical_file() sia da
+    _copy_local(): vedi is_same_physical_file() per la spiegazione del fallback."""
+    src_path = Path(src_path)
+    target_path = Path(target_path)
+    try:
+        if os.path.samefile(src_path, target_path):
+            return True
+    except OSError:
+        pass
+    try:
+        # Confronto sull'INTERO percorso ignorando le maiuscole, non solo sul nome del
+        # file: se anche la cartella cambia scrittura nello stesso momento (tipico,
+        # perché la stessa regola di capitalizzazione del titolo si applica sia al nome
+        # cartella sia al nome file), un confronto sensibile alle maiuscole sulla sola
+        # cartella genitore farebbe fallire il riconoscimento anche qui.
+        if str(src_path.resolve()).casefold() != str(target_path.resolve()).casefold():
+            return False
+        s1 = src_path.stat()
+        s2 = target_path.stat()
+        return s1.st_size == s2.st_size and int(s1.st_mtime) == int(s2.st_mtime)
+    except OSError:
+        return False
+
+
+def is_same_physical_file(src_path, dest, folder, filename):
+    """True se target esiste e punta allo STESSO file fisico del sorgente, anche se
+    la scrittura del nome è diversa (tipicamente solo le maiuscole). Capita normalmente
+    su un filesystem case-insensitive: Windows e macOS di norma, e su Linux con dischi
+    non nativi (NTFS/exFAT montati con ntfs-3g/exfat-fuse). Va distinto da un vero
+    duplicato: qui non c'è nessun altro file da sovrascrivere, serve solo correggere
+    la scrittura del nome — mai cancellare "la destinazione" in questo caso, è la
+    stessa sorgente. Non applicabile a destinazioni remote (nessun accesso diretto
+    al file per il confronto).
+
+    Il confronto primario è os.path.samefile() (stesso inode); alcuni driver FUSE
+    (es. ntfs-3g) non lo espongono in modo affidabile, quindi c'è un fallback: stesso
+    percorso completo ignorando le maiuscole (cartella e nome file insieme — non solo
+    il nome file, perché la stessa regola di capitalizzazione tocca entrambi), più
+    stessa dimensione e stessa data di modifica — su un vero case-insensitive-FS
+    coincidono sempre perché è la stessa voce di directory; due file DAVVERO diversi
+    con lo stesso percorso (maiuscole a parte) avrebbero comunque bisogno di dimensione
+    e istante di modifica identici, un caso praticamente impossibile per coincidenza."""
+    if is_remote(dest):
+        return False
+    return _paths_are_same_physical_file(src_path, Path(dest) / folder / filename)
 
 
 def download_poster(poster_path, target_folder_path, dest):
@@ -268,11 +356,12 @@ def _rsync_to_remote(src_path, dest, folder, filename, action, report):
 
 
 def _copy_local(src_path, target_dir, filename, action, report):
+    _ensure_correct_case_dir(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     target_file = target_dir / filename
 
     # Sorgente e destinazione coincidono: aprire il file in scrittura lo azzererebbe.
-    if target_file.exists() and os.path.samefile(src_path, target_file):
+    if target_file.exists() and _paths_are_same_physical_file(src_path, target_file):
         return
 
     if action == "move":
@@ -330,20 +419,44 @@ def move_or_copy_file(src, dest, folder, filename, poster_path=None, action="mov
 
     if rename_inplace:
         target_dir = Path(dest) / folder
+        old_parent_name = src_path.parent.name
+        if (_ensure_correct_case_dir(target_dir)
+                and old_parent_name.casefold() == target_dir.name.casefold()):
+            # La cartella genitore del sorgente è quella appena rinominata (stessa voce
+            # di directory, ora con la scrittura corretta): il file si è spostato
+            # insieme a lei, src_path non esiste più con il vecchio percorso.
+            src_path = target_dir / src_path.name
         target_dir.mkdir(parents=True, exist_ok=True)
         target_file = target_dir / filename
         report(50)
-        if not same:
+        same_now = src_path.resolve() == target_file.resolve()
+        if not same_now:
             if target_file.exists():
-                target_file.unlink()
-            shutil.move(str(src_path), str(target_file))
+                same_physical = is_same_physical_file(src_path, dest, folder, filename)
+                if same_physical:
+                    # Stesso file fisico del sorgente, cambia solo la scrittura del nome
+                    # (maiuscole/minuscole) su un filesystem case-insensitive: mai
+                    # cancellare "la destinazione", sarebbe cancellare la sorgente stessa
+                    # un attimo prima di spostarla. Si passa da un nome temporaneo, che
+                    # su qualunque filesystem case-insensitive non collide con nessuno
+                    # dei due nomi in gioco.
+                    tmp_name = target_file.with_name(f".{target_file.name}.mediatidy-tmp-{uuid.uuid4().hex[:8]}")
+                    src_path.rename(tmp_name)
+                    tmp_name.rename(target_file)
+                else:
+                    target_file.unlink()
+                    shutil.move(str(src_path), str(target_file))
+            else:
+                shutil.move(str(src_path), str(target_file))
         report(100)
     elif is_remote(dest):
         _rsync_to_remote(src_path, dest, folder, filename, action, report)
     else:
         _copy_local(src_path, Path(dest) / folder, filename, action, report)
 
-    if poster_path:
+    # Se il file era già esattamente al suo posto (nessuna operazione fatta sopra),
+    # non ha senso riscaricare il poster ogni volta: non è cambiato nulla da aggiornare.
+    if poster_path and not same:
         download_poster(poster_path, folder, dest)
 
 

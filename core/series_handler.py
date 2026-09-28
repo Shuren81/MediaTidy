@@ -22,8 +22,8 @@ from localization import tr
 from media_operations import (
     JUNK_SUBFOLDER_NAMES, cleanup_old_logs, extract_tmdb_id, find_fstab_mountpoint,
     get_dir_size, format_size, is_inplace_source, is_remote, is_same_file,
-    log_csv_row, log_event, mount_share, move_or_copy_file, target_exists,
-    unmount_share,
+    is_same_physical_file, log_csv_row, log_event, mount_share, move_or_copy_file,
+    target_exists, unmount_share,
 )
 from text_utils import format_title, sanitize_title
 from tmdb_client import get_episode_title, get_tv_details_by_id, search_tv
@@ -479,7 +479,12 @@ class SeriesWorker(QThread):
         if is_same_file(it["path"], dest, it["folder"], it["newname"]):
             set_status(it, "status_ready_inplace")
         elif target_ex:
-            set_status(it, "status_already_exists")
+            if is_same_physical_file(it["path"], dest, it["folder"], it["newname"]):
+                # Stesso file fisico, solo la scrittura del nome differisce (es. maiuscole
+                # su un filesystem case-insensitive): non è un duplicato, verrà rinominato.
+                set_status(it, "status_ready_inplace_rename")
+            else:
+                set_status(it, "status_already_exists")
         elif inplace:
             # Il file è già dentro l'albero di destinazione, ma nome/cartella calcolati
             # non coincidono esattamente con quelli attuali: "Sposta" lo rinominerebbe
@@ -492,6 +497,7 @@ class SeriesWorker(QThread):
         dest = CONFIG["dest_series"]
         while True:
             if (is_same_file(it["path"], dest, it["folder"], it["newname"])
+                    or is_same_physical_file(it["path"], dest, it["folder"], it["newname"])
                     or it.get("force_overwrite")
                     or not target_exists(dest, it["folder"], it["newname"])):
                 break
@@ -545,7 +551,11 @@ class SeriesWorker(QThread):
             set_status(it, "status_done_moved" if self.action == "move" else "status_done_copied")
         self.total_bytes += src_size
 
-        if self.clean_parent and self.action == "move":
+        if self.clean_parent and self.action == "move" and not rename:
+            # Mai in coda per la pulizia se l'episodio è stato rinominato SUL POSTO
+            # (stessa cartella): non è mai "uscito" da lì, quella cartella è casa sua,
+            # non un residuo da abbandonare. Vale sia per il no-op sia per la
+            # correzione maiuscole/formato: "rename" copre già entrambi i casi in-place.
             self._cleanup_dirs.setdefault(src_parent, i)
             # Registra anche la cartella "genitore" che l'utente ha trascinato (es. la
             # cartella della serie, sopra le sottocartelle Season NN), non solo la
