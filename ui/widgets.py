@@ -468,6 +468,9 @@ class CreditsPrivacyDialog(QDialog):
         <p><b>Librerie e Tecnologie:</b><br>
         - Python & QtPy (PyQt/PySide)<br>
         - API ufficiali di TMDB (The Movie Database)</p>
+        <p><b>Dati di film e serie TV:</b> forniti da
+        <a href="https://www.themoviedb.org/">TMDB</a>.<br>
+        <i>This product uses the TMDB API but is not endorsed or certified by TMDB.</i></p>
         <p><b>Licenza:</b> MIT License</p>
         """
         browser_cred = QTextBrowser()

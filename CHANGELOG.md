@@ -4,6 +4,57 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
+## [1.1.0] - 2026-10-01
+
+Prima versione preparata per Windows e macOS, oltre a Linux.
+
+### Aggiunto
+
+- **Build automatiche** con GitHub Actions (`.github/workflows/build.yml`): a
+  ogni push i test girano su Linux, Windows e macOS, poi vengono creati
+  l'AppImage per Linux, l'`.exe` per Windows e l'`.app` per macOS (Apple
+  Silicon), scaricabili dalla scheda Actions. Un tag `v…` crea anche una
+  release in bozza con i tre file allegati.
+- **Test automatici** (`tests/test_smoke.py`): avvio della finestra, regole
+  per sistema, spostamento di un film, correzione delle maiuscole in
+  libreria, episodio con l'anno nel nome. Su Windows e macOS girano su
+  filesystem reali che non distinguono le maiuscole.
+- Nuovo modulo `platform_utils.py` che raccoglie in un solo punto le
+  differenze tra i sistemi.
+- Attribuzione TMDB nella finestra Crediti, come richiesto dai termini di
+  TMDB ("This product uses the TMDB API but is not endorsed or certified by
+  TMDB").
+
+### Modificato
+
+- Destinazioni remote SSH/rsync e montaggio/smontaggio automatico da
+  `/etc/fstab` disponibili solo su Linux; su Windows e macOS l'opzione di
+  smontaggio non compare nelle Opzioni.
+- Cartella predefinita di log e CSV secondo lo standard di ciascun sistema
+  (Linux invariata, `~/.local/share/MediaTidy/logs`).
+- Suono e notifica di fine operazione con gli strumenti nativi di Windows
+  e macOS (su Windows solo il suono: il riepilogo compare comunque).
+- I nomi di file e cartelle vengono resi validi anche per Windows su tutti
+  i sistemi: tolti punti e spazi finali, aggiunto "_" ai nomi riservati
+  (CON, NUL, COM1…).
+- I file `Thumbs.db`, `desktop.ini` e `.DS_Store` rimasti in una cartella di
+  origine vengono trattati come residui noti, come il vecchio `poster.jpg`.
+- Su Windows un percorso di destinazione oltre i 259 caratteri viene segnato
+  in errore con una spiegazione chiara.
+- `.gitignore`: esclusi `build/`, `dist/`, `tools/` e i file `.spec`.
+
+### Corretto
+
+- Su Windows un percorso come `D:\Film` sarebbe stato scambiato per una
+  destinazione SSH (contiene ":"), rendendo inutilizzabile qualsiasi
+  destinazione.
+- Su Windows il controllo "già a posto" avrebbe considerato identici due
+  nomi con maiuscole diverse, perché lì il sistema restituisce il percorso
+  con le maiuscole scritte sul disco: la correzione delle maiuscole non
+  sarebbe mai partita. Ora il confronto usa i nomi reali presenti sul disco.
+- L'icona non veniva trovata avviando il programma dall'eseguibile a file
+  singolo di PyInstaller (usato per Windows).
+
 ## [1.0.14] - 2026-09-30
 
 ### Aggiunto

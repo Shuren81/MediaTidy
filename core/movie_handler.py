@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from config import CONFIG
+from platform_utils import safe_component, safe_relative_path
 from localization import tr
 from media_operations import (
     JUNK_SUBFOLDER_NAMES, only_known_leftovers, same_folder_ci, VIDEO_EXT, cleanup_old_logs, download_poster,
@@ -588,6 +589,11 @@ class MovieWorker(BatchConflictMixin, QThread):
         if not it.get("custom_override"):
             folder, newname = build_names(movie_info, it["path"].suffix)
             it["folder"], it["newname"] = folder, newname
+
+        # Nomi validi anche su Windows e sui dischi NTFS/exFAT (punti/spazi finali,
+        # nomi riservati come CON o NUL), su tutti i sistemi.
+        it["folder"] = safe_relative_path(it["folder"])
+        it["newname"] = safe_component(it["newname"])
 
         dest = CONFIG["dest_movies"]
         inplace = is_inplace_source(it["path"], dest)

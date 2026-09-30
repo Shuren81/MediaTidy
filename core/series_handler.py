@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 from config import CONFIG
+from platform_utils import safe_component, safe_relative_path
 from localization import tr
 from media_operations import (
     JUNK_SUBFOLDER_NAMES, only_known_leftovers, same_folder_ci, cleanup_old_logs, extract_tmdb_id, find_fstab_mountpoint,
@@ -519,6 +520,11 @@ class SeriesWorker(BatchConflictMixin, QThread):
             it["folder"] = f"{show_folder}/{season_folder}"
             it["newname"] = build_episode_name(titolo, it["season"], it["episodes"], ep_title, it["path"].suffix,
                                                year=show_info.get("year"))
+
+        # Nomi validi anche su Windows e sui dischi NTFS/exFAT (punti/spazi finali,
+        # nomi riservati come CON o NUL), su tutti i sistemi.
+        it["folder"] = safe_relative_path(it["folder"])
+        it["newname"] = safe_component(it["newname"])
 
         dest = CONFIG["dest_series"]
         inplace = is_inplace_source(it["path"], dest)

@@ -20,6 +20,10 @@ from pathlib import Path
 import requests
 
 from config import CONFIG
+from platform_utils import (
+    IS_LINUX, default_log_dir, looks_like_windows_path, notify, path_too_long,
+    play_done_sound, supports_fstab_mount, supports_remote,
+)
 
 VIDEO_EXT = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".wmv", ".mpg", ".mpeg", ".ts"}
 
@@ -35,7 +39,8 @@ JUNK_SUBFOLDER_NAMES = frozenset({
 
 # File residui "noti" che, da soli, non giustificano il prompt di conferma:
 # una cartella di origine che contiene SOLO questi viene rimossa in silenzio.
-SILENT_LEFTOVER_FILES = frozenset({"poster.jpg"})
+# (più i file che Windows e macOS creano da soli nelle cartelle sfogliate)
+SILENT_LEFTOVER_FILES = frozenset({"poster.jpg", "thumbs.db", "desktop.ini", ".ds_store"})
 
 
 def only_known_leftovers(folder):
@@ -82,7 +87,7 @@ def get_log_dir():
     if configured_path:
         return Path(configured_path).expanduser()
 
-    return Path.home() / ".local" / "share" / "MediaTidy" / "logs"
+    return default_log_dir()
 
 def redact(text):
     """Nasconde la chiave API TMDB in qualsiasi testo destinato a UI, log o CSV."""
@@ -155,6 +160,10 @@ def log_csv_row(kind, header, values):
 
 
 def is_remote(dest):
+    """Destinazione SSH "utente@host:/percorso". Solo su Linux: su Windows "D:\\Film"
+    contiene ":" ma è un normale percorso locale."""
+    if not supports_remote() or not dest or looks_like_windows_path(dest):
+        return False
     return ":" in dest and not dest.startswith("/")
 
 
@@ -188,15 +197,33 @@ def is_inplace_source(src_path, dest_base):
         return False
 
 
+def _exists_with_exact_case(base, rel):
+    """True se ogni parte di rel (cartelle e nome file) esiste sotto base con ESATTAMENTE
+    quella scrittura. Serve sui filesystem che non distinguono le maiuscole: lì il
+    percorso "sbagliato" risulta comunque esistente, e su Windows resolve() restituisce
+    perfino la scrittura del disco, quindi un confronto di percorsi non basta."""
+    cur = Path(base)
+    for part in Path(rel).parts:
+        try:
+            if part not in os.listdir(cur):
+                return False
+        except OSError:
+            return False
+        cur = cur / part
+    return True
+
+
 def is_same_file(src_path, dest, folder, filename):
     """True se il file sorgente è già esattamente nel percorso di destinazione finale
     (stessa scrittura, maiuscole comprese): nessuna operazione da fare."""
     if not is_inplace_source(src_path, dest):
         return False
     try:
-        return Path(src_path).resolve() == (Path(dest) / folder / filename).resolve()
+        if Path(src_path).resolve() != (Path(dest) / folder / filename).resolve():
+            return False
     except OSError:
         return False
+    return _exists_with_exact_case(dest, Path(folder) / filename)
 
 
 def _ensure_correct_case_dir(target_dir):
@@ -429,13 +456,16 @@ def move_or_copy_file(src, dest, folder, filename, poster_path=None, action="mov
     """Sposta/copia (o rinomina in-place) un file video verso dest/folder/filename.
     La pulizia della cartella d'origine NON avviene qui ma a fine esecuzione."""
     src_path = Path(src)
+    if not is_remote(dest) and path_too_long(Path(dest) / folder / filename):
+        from localization import tr
+        raise RuntimeError(tr("err_path_too_long", n=len(str(Path(dest) / folder / filename))))
 
     def report(pct):
         if progress_callback:
             progress_callback(pct)
 
     inplace = is_inplace_source(src_path, dest)
-    same = inplace and src_path.resolve() == (Path(dest) / folder / filename).resolve()
+    same = inplace and is_same_file(src_path, dest, folder, filename)
     # In-place: rinomina solo in modalità Sposta (o se il file è già al suo posto).
     rename_inplace = inplace and (action == "move" or same)
 
@@ -451,7 +481,7 @@ def move_or_copy_file(src, dest, folder, filename, poster_path=None, action="mov
         target_dir.mkdir(parents=True, exist_ok=True)
         target_file = target_dir / filename
         report(50)
-        same_now = src_path.resolve() == target_file.resolve()
+        same_now = is_same_file(src_path, dest, folder, filename)
         if not same_now:
             if target_file.exists():
                 same_physical = is_same_physical_file(src_path, dest, folder, filename)
@@ -483,6 +513,8 @@ def move_or_copy_file(src, dest, folder, filename, poster_path=None, action="mov
 
 
 def find_fstab_mountpoint(dest, fstab="/etc/fstab"):
+    if not supports_fstab_mount():
+        return None  # montaggio automatico da fstab: solo Linux
     dest = os.path.abspath(dest)
     try:
         lines = Path(fstab).read_text().splitlines()
@@ -512,6 +544,14 @@ def unmount_share(mp):
 
 
 def play_system_sound():
+    if not IS_LINUX:
+        if not play_done_sound():
+            try:
+                from qtpy.QtWidgets import QApplication
+                QApplication.beep()
+            except Exception:
+                pass
+        return
     sound_files = [
         "/usr/share/sounds/freedesktop/stereo/complete.oga",
         "/usr/share/sounds/mint/complete.oga",
@@ -536,6 +576,9 @@ def play_system_sound():
 
 
 def send_mint_notification(title, message):
+    if not IS_LINUX:
+        notify(title, message)
+        return
     try:
         subprocess.Popen(
             ["notify-send", "-i", "video-x-generic", "-a", "MediaTidy", title, message],

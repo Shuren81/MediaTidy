@@ -56,6 +56,9 @@ class SettingsDialog(QDialog):
         self.unmount_chk = QCheckBox(tr("unmount_chk"))
         self.unmount_chk.setChecked(CONFIG["unmount"])
         layout.addRow("", self.unmount_chk)
+        # Montaggio/smontaggio automatico da /etc/fstab: esiste solo su Linux.
+        from platform_utils import supports_fstab_mount
+        self.unmount_chk.setVisible(supports_fstab_mount())
 
         self.clean_dir_chk = QCheckBox(tr("clean_dir_chk"))
         self.clean_dir_chk.setChecked(CONFIG["clean_parent_dir"])

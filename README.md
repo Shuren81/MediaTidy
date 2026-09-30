@@ -1,6 +1,6 @@
 # MediaTidy
 
-MediaTidy è un’applicazione desktop per Linux che rinomina e organizza film e serie TV usando i metadati di [TMDB](https://www.themoviedb.org/).
+MediaTidy è un’applicazione desktop per Linux, Windows e macOS che rinomina e organizza film e serie TV usando i metadati di [TMDB](https://www.themoviedb.org/).
 
 L’interfaccia grafica include due schede dedicate:
 
@@ -20,7 +20,7 @@ L’applicazione consente di analizzare i file video, cercare i metadati corrisp
 - Rinomina direttamente nella cartella sorgente, quando appropriato.
 - Gestione dei duplicati: sovrascrittura, suffisso automatico, modifica manuale o salto.
 - Pulizia opzionale delle cartelle sorgenti vuote dopo uno spostamento.
-- Supporto per destinazioni locali e remote tramite SSH/rsync.
+- Supporto per destinazioni locali e, solo su Linux, remote tramite SSH/rsync.
 - Download opzionale di poster da TMDB.
 - Interfaccia in italiano e inglese.
 - Log giornalieri e file CSV per le operazioni relative a film e serie TV.
@@ -29,9 +29,15 @@ L’applicazione consente di analizzare i file video, cercare i metadati corrisp
 
 ## Installazione
 
-### AppImage
+I file per ogni sistema sono nella pagina [Releases](../../releases):
 
-La versione consigliata per Linux è disponibile nella pagina [Releases](../../releases).
+| Sistema | File |
+|---|---|
+| Linux (x86_64) | `MediaTidy-<versione>-linux-x86_64.AppImage` |
+| Windows (64 bit) | `MediaTidy-<versione>-windows-x64.exe` |
+| macOS (Apple Silicon) | `MediaTidy-<versione>-macos-arm64.zip` |
+
+### Linux (AppImage)
 
 1. Scarica il file AppImage più recente.
 2. Rendilo eseguibile:
@@ -48,9 +54,45 @@ La versione consigliata per Linux è disponibile nella pagina [Releases](../../r
 
 In alternativa, dal file manager di Linux Mint, fai clic destro sul file, apri **Proprietà → Permessi**, abilita l’esecuzione come programma e apri il file.
 
+### Windows
+
+1. Scarica il file `.exe` e avvialo: non richiede installazione.
+2. Al primo avvio Windows può mostrare l’avviso **“Windows ha protetto il PC”**
+   (SmartScreen), perché il programma non è firmato digitalmente: fai clic su
+   **Ulteriori informazioni → Esegui comunque**.
+
+Log e CSV vengono salvati in `%LOCALAPPDATA%\MediaTidy\logs`.
+
+### macOS
+
+1. Scarica il file `.zip`, estrailo e sposta `MediaTidy.app` nella cartella **Applicazioni**.
+2. Al primo avvio macOS lo blocca, perché il programma non è firmato da uno
+   sviluppatore Apple registrato: apri **Impostazioni di Sistema → Privacy e
+   sicurezza** e fai clic su **Apri comunque** accanto al messaggio su MediaTidy.
+   In alternativa, dal Terminale:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/MediaTidy.app
+   ```
+
+La build è per i Mac con processore Apple (M1 e successivi). Log e CSV vengono
+salvati in `~/Library/Application Support/MediaTidy/logs`.
+
+### Differenze tra i sistemi
+
+- Le destinazioni remote via **SSH/rsync** e il **montaggio/smontaggio
+  automatico** dei dischi da `/etc/fstab` sono disponibili solo su Linux.
+  Su Windows e macOS la destinazione è una cartella locale, su un disco
+  interno, esterno o di rete già collegato dal sistema (es. `D:\Film`,
+  `\\NAS\Film` o `/Volumes/NAS/Film`).
+- Su Windows un percorso completo di destinazione non può superare i 259
+  caratteri: se succede, il file viene segnato in errore con una spiegazione.
+- I nomi di file e cartelle vengono generati validi per tutti i sistemi, così
+  la stessa libreria può essere usata indifferentemente da Linux, Windows e macOS.
+
 ### Da sorgente
 
-Clona il repository ed esegui:
+Clona il repository ed esegui su Linux o macOS:
 
 ```bash
 python3 -m venv venv
@@ -58,6 +100,22 @@ source venv/bin/activate
 pip install -r requirements.txt
 python3 media_tidy.py
 ```
+
+Su Windows:
+
+```bat
+py -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+py media_tidy.py
+```
+
+### Build automatiche
+
+Il workflow `.github/workflows/build.yml` esegue i test su Linux, Windows e
+macOS a ogni push e crea i tre pacchetti, scaricabili dalla scheda **Actions**
+del repository. Pubblicando un tag che inizia con `v` (es. `v1.1.0`) crea anche
+una release in bozza con i tre file allegati.
 
 ## Configurazione
 
@@ -112,6 +170,7 @@ MediaTidy/
 ├── localization.py           # Traduzioni italiano/inglese
 ├── text_utils.py             # Sanificazione e capitalizzazione dei titoli
 ├── media_operations.py       # Log, CSV, file, mount, SSH e rsync
+├── platform_utils.py         # Differenze tra Linux, Windows e macOS
 ├── tmdb_client.py            # Client API TMDB
 ├── MT_Icon.png               # Icona dell’applicazione
 ├── requirements.txt          # Dipendenze Python
@@ -128,6 +187,10 @@ MediaTidy/
 │   ├── settings_dialog.py    # Finestra Opzioni (impostazioni globali)
 │   ├── format_dialog.py      # Finestra Formato Nomi (per scheda: Film/Serie)
 │   └── widgets.py            # Widget e dialoghi condivisi
+├── tests/
+│   └── test_smoke.py         # Test automatici (eseguiti anche da GitHub Actions)
+├── .github/workflows/
+│   └── build.yml             # Test e build per Linux, Windows e macOS
 └── AppImage/
     ├── build_appimage.sh     # Script di build locale
     └── MediaTidy.desktop     # Desktop entry dell’AppImage
@@ -165,7 +228,7 @@ Le richieste possono includere:
 
 I file video dell’utente non vengono caricati su TMDB.
 
-Se viene configurata una destinazione remota, MediaTidy usa SSH e rsync per trasferire file e poster verso il server scelto dall’utente. La sicurezza e la privacy del server remoto sono responsabilità dell’utente.
+Se viene configurata una destinazione remota (solo su Linux), MediaTidy usa SSH e rsync per trasferire file e poster verso il server scelto dall’utente. La sicurezza e la privacy del server remoto sono responsabilità dell’utente.
 
 ### Chiave API TMDB
 

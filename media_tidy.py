@@ -11,9 +11,11 @@ from pathlib import Path
 from qtpy.QtGui import QIcon
 from qtpy.QtWidgets import QApplication
 
+from platform_utils import resource_path
 from ui.main_window import MainWindow
 
-ICON_PATH = Path(__file__).resolve().parent / "MT_Icon.png"
+# Funziona sia da sorgente sia dall'eseguibile creato da PyInstaller (Windows/macOS/AppImage).
+ICON_PATH = resource_path("MT_Icon.png")
 
 
 def main():
