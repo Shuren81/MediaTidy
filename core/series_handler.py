@@ -20,7 +20,7 @@ from pathlib import Path
 from config import CONFIG
 from localization import tr
 from media_operations import (
-    JUNK_SUBFOLDER_NAMES, cleanup_old_logs, extract_tmdb_id, find_fstab_mountpoint,
+    JUNK_SUBFOLDER_NAMES, only_known_leftovers, same_folder_ci, cleanup_old_logs, extract_tmdb_id, find_fstab_mountpoint,
     get_dir_size, format_size, is_inplace_source, is_remote, is_same_file,
     is_same_physical_file, log_csv_row, log_event, mount_share, move_or_copy_file,
     target_exists, unmount_share,
@@ -29,7 +29,7 @@ from text_utils import format_title, sanitize_title
 from tmdb_client import get_episode_title, get_tv_details_by_id, search_tv
 
 from core.movie_handler import (  # riuso: stessi stati/norma/soglia di similarità dei film
-    DONE_KEYS, ERROR_KEYS, READY_KEYS, SIMILARITY_THRESHOLD, SKIP_KEYS,
+    DONE_KEYS, ERROR_KEYS, READY_KEYS, SIMILARITY_THRESHOLD, SKIP_KEYS, BatchConflictMixin,
     is_done, norm, set_status, status_text,
 )
 from core.series_classifier import classify_directory, scan_release_dir
@@ -107,7 +107,7 @@ def collect_items_for_path(path, known_paths):
     """Nuovi item (dict) per il drag&drop di un file o di una cartella di release.
     I file già presenti (known_paths) e le clip (sample/trailer/extra...) sono ignorati."""
     new_items = []
-    release_dir = path if Path(path).is_dir() else None
+    release_dir = Path(path) if Path(path).is_dir() else None
     for info, abs_path in scan_path_for_episodes(path):
         if info.kind == "clip" or abs_path in known_paths:
             continue
@@ -159,7 +159,13 @@ def build_show_folder(show_info, cap_rule=None):
     return titolo, base
 
 
-def build_episode_name(show_title, season, episodes, ep_title, ext):
+def build_episode_name(show_title, season, episodes, ep_title, ext, year=None):
+    # Opzionale: l'anno della serie nel nome del file, per distinguere serie omonime di
+    # anni diversi (es. Doctor Who 1963 / 2005). Senza anno noto non si aggiunge nulla,
+    # e non lo si raddoppia se il titolo finisce già con "(anno)".
+    if year and CONFIG.get("series_year_in_filename", False) \
+            and not show_title.rstrip().endswith(f"({year})"):
+        show_title = f"{show_title} ({year})"
     if len(episodes) > 1:
         code = f"S{season:02d}E{episodes[0]:02d}-E{episodes[-1]:02d}"
     else:
@@ -170,7 +176,9 @@ def build_episode_name(show_title, season, episodes, ep_title, ext):
     return name + ext.lower()
 
 
-class SeriesWorker(QThread):
+class SeriesWorker(BatchConflictMixin, QThread):
+    DEST_KEY = "dest_series"
+    ask_conflict = Signal(list)
     row_update = Signal(int)
     progress = Signal(int, int)
     file_progress = Signal(int)
@@ -205,9 +213,13 @@ class SeriesWorker(QThread):
         self.total_bytes = 0
         self.elapsed = 0.0
         self.succeeded_count = 0
+        self.already_count = 0
         self.skipped_count = 0
         self.error_count = 0
         self.result_details = []  # [{"name", "status", "message"}, ...]
+        self.cancelled = False       # l'utente ha scelto "Annulla" nel dialogo duplicati
+        self.unprocessed_count = 0   # file non elaborati a causa dell'annullamento
+        self.kept_folders = []       # [(percorso, motivo)] cartelle di origine NON rimosse
 
     def provide(self, show):
         self._answer = show
@@ -215,7 +227,8 @@ class SeriesWorker(QThread):
 
     def provide_dup_choice(self, choice, apply_to_all):
         self._answer = choice
-        if apply_to_all and choice != "custom":
+        # "Annulla" non si applica mai "a tutti": interrompe subito il lavoro.
+        if apply_to_all and choice in ("overwrite", "suffix", "skip"):
             self.default_dup_action = choice
         self._evt.set()
 
@@ -286,7 +299,12 @@ class SeriesWorker(QThread):
             self.error.emit(str(e))
             return
         total = len(self.rows)
+        if self.mode == "action":
+            self._resolve_batch_conflicts()
+        n = 1
         for n, i in enumerate(self.rows, 1):
+            if self.cancelled:
+                break
             it = self.items[i]
             self.progress.emit(n, total)
             try:
@@ -297,6 +315,8 @@ class SeriesWorker(QThread):
             except Exception as e:
                 set_status(it, "status_error", str(e))
                 log_event("ERROR", f"[Serie] {it.get('path', '')}: {e}")
+            if self.cancelled:
+                break
             key = it.get("status", "")
             if self.mode == "action":
                 if key in ERROR_KEYS:
@@ -307,10 +327,16 @@ class SeriesWorker(QThread):
                     })
                 elif key in SKIP_KEYS:
                     self.skipped_count += 1
+                    if self.clean_parent and self.action == "move":
+                        # Mai cancellata (contiene ancora il file saltato), ma va valutata
+                        # così compare nel riepilogo tra le cartelle conservate, col motivo.
+                        self._cleanup_dirs.setdefault(Path(it["path"]).parent, i)
                     self.result_details.append({
                         "name": it["path"].name, "status": tr(key),
                         "message": it.get("status_detail") or tr(key),
                     })
+                elif key == "status_done_already":
+                    self.already_count += 1
                 elif key in DONE_KEYS:
                     self.succeeded_count += 1
             text = status_text(it)
@@ -324,6 +350,16 @@ class SeriesWorker(QThread):
                          it.get("newname", ""), it.get("folder", ""),
                          tr(key) if key else "", it.get("status_detail", "")])
             self.row_update.emit(i)
+
+        if self.cancelled:
+            remaining = self.rows[n - 1:]
+            self.unprocessed_count = len(remaining)
+            for j in remaining:
+                self.result_details.append({
+                    "name": self.items[j]["path"].name, "status": tr("status_not_processed"),
+                    "message": tr("batch_msg_cancelled"),
+                })
+            log_event("INFO", f"[Serie] Interrotto dall'utente: {self.unprocessed_count} file non elaborati")
 
         if self.mode == "action" and self.clean_parent and self.action == "move":
             try:
@@ -345,7 +381,7 @@ class SeriesWorker(QThread):
 
     def _has_pending_files(self, folder):
         for it in self.items:
-            if is_done(it):
+            if is_done(it) or it.get("status") == "status_skipped_discarded":
                 continue
             try:
                 p = Path(it["path"])
@@ -366,7 +402,8 @@ class SeriesWorker(QThread):
                 target = (Path(dest) / it.get("folder", "") / it["newname"]).resolve()
             except OSError:
                 continue
-            if folder == target.parent or folder in target.parents:
+            f = str(folder).casefold()
+            if any(f == str(p).casefold() for p in (target.parent, *target.parents)):
                 return True
         return False
 
@@ -386,11 +423,18 @@ class SeriesWorker(QThread):
                     continue
                 if dest_root and (folder == dest_root or folder in dest_root.parents):
                     continue
-                if self._has_pending_files(folder) or self._is_target_folder(folder):
+                if self._has_pending_files(folder):
+                    self.kept_folders.append((str(folder), "pending"))
+                    continue
+                if self._is_target_folder(folder):
                     continue
                 if not any(folder.iterdir()):
                     folder.rmdir()
                     log_event("INFO", f"[Serie] Cartella di origine vuota rimossa: {folder}")
+                    continue
+                if only_known_leftovers(folder):
+                    shutil.rmtree(folder)
+                    log_event("INFO", f"[Serie] Cartella di origine rimossa (conteneva solo poster.jpg): {folder}")
                     continue
                 if any(child.is_dir() for child in folder.iterdir()):
                     subdirs = [child for child in folder.iterdir() if child.is_dir()]
@@ -401,11 +445,14 @@ class SeriesWorker(QThread):
                         # non ancora elaborata o contenuto non correlato. Non la proponiamo MAI
                         # in cancellazione, nemmeno con conferma.
                         log_event("INFO", f"[Serie] Cartella di origine conservata (sottocartelle non riconosciute: {unknown}): {folder}")
+                        self.kept_folders.append((str(folder), "unknown_subdirs"))
                         continue
                 choice = self._ask_non_empty_dir(row, str(folder), format_size(get_dir_size(folder)))
                 if choice == "yes":
                     shutil.rmtree(folder)
                     log_event("INFO", f"[Serie] Cartella di origine rimossa con residui: {folder}")
+                else:
+                    self.kept_folders.append((str(folder), "user"))
             except Exception as e:
                 log_event("WARNING", f"[Serie] Pulizia di {folder} non riuscita: {e}")
 
@@ -470,7 +517,8 @@ class SeriesWorker(QThread):
                 except Exception:
                     ep_title = ""
             it["folder"] = f"{show_folder}/{season_folder}"
-            it["newname"] = build_episode_name(titolo, it["season"], it["episodes"], ep_title, it["path"].suffix)
+            it["newname"] = build_episode_name(titolo, it["season"], it["episodes"], ep_title, it["path"].suffix,
+                                               year=show_info.get("year"))
 
         dest = CONFIG["dest_series"]
         inplace = is_inplace_source(it["path"], dest)
@@ -494,6 +542,8 @@ class SeriesWorker(QThread):
             set_status(it, "status_ready")
 
     def _process(self, i, it):
+        if it.get("status") in ("status_skipped_dup", "status_skipped_discarded"):
+            return  # già deciso nel dialogo dei doppioni del lotto: il file resta dov'è
         dest = CONFIG["dest_series"]
         while True:
             if (is_same_file(it["path"], dest, it["folder"], it["newname"])
@@ -503,8 +553,11 @@ class SeriesWorker(QThread):
                 break
 
             dup_choice = self._ask_duplicate(i)
-            if dup_choice == "custom":
-                continue
+            if dup_choice == "cancel":
+                # Interrompe tutto il lavoro: questo file (e i successivi) restano intatti,
+                # nel dialogo nessuna operazione su disco era ancora iniziata.
+                self.cancelled = True
+                return
             if dup_choice == "suffix":
                 p = Path(it["newname"])
                 base = p.stem
@@ -517,6 +570,13 @@ class SeriesWorker(QThread):
             if dup_choice == "overwrite":
                 break
             set_status(it, "status_skipped_dup")
+            return
+
+        if is_same_file(it["path"], dest, it["folder"], it["newname"]):
+            # Già esattamente al suo posto (nome e cartella identici): nessuna
+            # operazione su disco, niente poster, niente pulizia. Stato dedicato,
+            # contato a parte nel riepilogo (non come "spostato").
+            set_status(it, "status_done_already")
             return
 
         inplace = is_inplace_source(it["path"], dest)
@@ -551,20 +611,20 @@ class SeriesWorker(QThread):
             set_status(it, "status_done_moved" if self.action == "move" else "status_done_copied")
         self.total_bytes += src_size
 
-        if self.clean_parent and self.action == "move" and not rename:
-            # Mai in coda per la pulizia se l'episodio è stato rinominato SUL POSTO
-            # (stessa cartella): non è mai "uscito" da lì, quella cartella è casa sua,
-            # non un residuo da abbandonare. Vale sia per il no-op sia per la
-            # correzione maiuscole/formato: "rename" copre già entrambi i casi in-place.
-            self._cleanup_dirs.setdefault(src_parent, i)
-            # Registra anche la cartella "genitore" che l'utente ha trascinato (es. la
-            # cartella della serie, sopra le sottocartelle Season NN), non solo la
-            # cartella immediata del file: altrimenti resta fuori dalla pulizia, senza
-            # calcolo né prompt, anche se svuotata di tutte le sue stagioni.
+        if self.clean_parent and self.action == "move":
+            # In coda per la pulizia solo se l'episodio è davvero finito in una cartella
+            # DIVERSA (confronto senza maiuscole): se è rimasto nella stessa, anche solo
+            # cambiandone la scrittura, quella cartella è casa sua e non va mai proposta.
+            target_dir = Path(dest) / it["folder"]
+            if not same_folder_ci(src_parent, target_dir):
+                self._cleanup_dirs.setdefault(src_parent, i)
+            # Anche la cartella "genitore" trascinata (es. la cartella della serie sopra
+            # Season NN), purché non coincida con quella del file o con quella finale.
             release_dir = it.get("release_dir")
             if release_dir:
-                release_dir = release_dir.resolve()
-                if release_dir != src_parent:
+                release_dir = Path(release_dir).resolve()
+                if (not same_folder_ci(release_dir, src_parent)
+                        and not same_folder_ci(release_dir, target_dir)):
                     self._cleanup_dirs.setdefault(release_dir, i)
         # Scarica poster della serie nella cartella principale (una volta sola).
         # Presuppone folder = "{cartella serie}/Season NN": con un override manuale

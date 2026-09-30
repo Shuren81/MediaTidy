@@ -4,6 +4,135 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
+## [1.0.14] - 2026-09-30
+
+### Aggiunto
+
+- Serie TV: nuova opzione in Formato Nomi, "Includi l'anno della serie nel
+  nome del file", spenta di default. Attivandola il nome diventa
+  `Knight Rider (2008) - S01E01 - A Knight in Shining Armor.mkv`: serve a
+  distinguere serie omonime di anni diversi (es. Doctor Who 1963 e 2005) anche
+  guardando solo il nome del file. Se l'anno non è noto non viene aggiunto
+  nulla, e non viene raddoppiato se il titolo finisce già con "(anno)".
+  Attivata su una libreria già organizzata, i file risultano "Pronto (verrà
+  rinominato)" e vengono rinominati sul posto, senza spostarli.
+
+## [1.0.13] - 2026-09-30
+
+### Corretto
+
+- Tutte le colonne della tabella si restringevano quando nella colonna Stato
+  compariva un messaggio lungo (come la nota sui file scartati della v1.0.12,
+  ma lo stesso valeva per qualunque messaggio d'errore lungo): le colonne
+  non "stretch" si adattano al contenuto, quindi la colonna Stato si
+  allargava fino a schiacciare tutte le altre. Ora il testo mostrato nella
+  cella è limitato a 70 caratteri, col testo completo nel tooltip.
+- Dopo aver scelto "Tieni solo questo" nel dialogo dei doppioni del lotto, il
+  file scartato restava nella cartella di origine e la proteggeva in
+  silenzio: niente domanda di rimozione, solo una riga nel riepilogo. I file
+  scartati per scelta hanno ora uno stato dedicato ("Scartato (scelto un
+  altro file)") e non impediscono più la pulizia: la cartella viene proposta
+  per la rimozione col solito avviso "cartella non vuota" e la dimensione
+  residua. Restano protette, come prima, le cartelle che contengono file
+  saltati senza una scelta (Salta tutti, Salta nel dialogo dei duplicati già
+  presenti) o non ancora elaborati.
+
+## [1.0.12] - 2026-09-30
+
+### Corretto
+
+- Importando una cartella di serie con due file dello stesso episodio
+  (per esempio 1080p e 720p), ne veniva importato uno solo: il secondo era
+  scartato in silenzio come "probabile sample" solo perché più piccolo.
+  Ora un file con lo stesso codice episodio viene scartato soltanto se è
+  davvero un sample: il nome contiene una parola da clip (sample, trailer…)
+  oppure è molto più piccolo (sotto il 25% del principale). Una seconda
+  versione di dimensione simile resta in lista e viene gestita come doppione.
+
+### Modificato
+
+- Doppioni all'interno dello stesso lotto (più file che avrebbero lo stesso
+  nome finale): prima di spostare qualsiasi cosa compare un dialogo con i
+  file affiancati (nome, dimensione, data, percorso) e i pulsanti per aprire
+  ciascuna cartella di origine. Si sceglie "Tieni solo questo" su uno dei
+  file, "Tieni tutti" (i successivi prendono _1, _2…), "Salta tutti" oppure
+  "Annulla operazione". I file scartati restano intatti nella cartella di
+  origine e compaiono nel riepilogo con il motivo. Prima il primo file
+  veniva spostato subito e il secondo chiedeva se sovrascriverlo, con il
+  rischio di perdere il primo in modo irreversibile; il dialogo dei
+  duplicati già presenti in libreria resta invariato.
+
+## [1.0.11] - 2026-09-30
+
+### Corretto
+
+- I file segnati in rosso "Esiste già" venivano esclusi dall'esecuzione
+  prima ancora di partire: il programma non chiedeva mai cosa farne. Ora
+  entrano nel lavoro (l'etichetta diventa "Esiste già (chiederà)") e al
+  momento dell'esecuzione compare il dialogo dei duplicati. I pulsanti
+  Sposta/Copia li includono nel conteggio.
+- Due file dello stesso lotto che, una volta rinominati, avrebbero avuto lo
+  stesso nome risultavano entrambi verdi al Test, anche se in destinazione
+  non c'era ancora nulla, e il conflitto emergeva solo a metà lavoro. Ora il
+  Test li segnala subito in rosso: "Nome duplicato nel lotto (chiederà)".
+
+### Modificato
+
+- Nuovo dialogo dei duplicati: mostra il file di origine e quello già
+  presente con dimensione, data di modifica e percorso, e avvisa quando
+  sembrano lo stesso file. Pulsanti per aprire la cartella di origine e
+  quella di destinazione, spunta "Applica questa scelta ai prossimi
+  duplicati" e le scelte Sovrascrivi, Rinomina (aggiunge _1, _2…), Salta e
+  Annulla operazione. Sovrascrivere in automatico tutti i duplicati
+  richiede una conferma esplicita; Annulla non si applica mai "a tutti".
+  Chiudere la finestra equivale a Salta.
+- **Annulla operazione** interrompe il lavoro senza toccare il file in
+  questione né i successivi, esegue comunque la pulizia delle cartelle per
+  quanto già spostato e mostra il riepilogo con il titolo "(interrotta)",
+  il numero di file non elaborati e il loro elenco nei dettagli.
+- Il riepilogo di fine lavoro indica quante cartelle di origine sono state
+  conservate, e nei dettagli le elenca con il motivo: contiene ancora file
+  saltati o non elaborati, contiene sottocartelle non riconosciute, oppure
+  cancellazione rifiutata dall'utente.
+
+## [1.0.10] - 2026-09-29
+
+### Corretto
+
+- I file già esattamente al loro posto ("Pronto (già a posto)") venivano
+  contati nel riepilogo di fine operazione come "spostati", con la loro
+  dimensione inclusa nel totale, e nella tabella finivano come
+  "Fatto (Rinominato)" — anche se su disco non veniva toccato nulla. Ora
+  hanno uno stato dedicato, **"Fatto (già a posto)"**, non passano più
+  per la routine di spostamento, e nel riepilogo compaiono a parte
+  (es. "2 file spostati/copiati (8 GB) — 3 già a posto, 0 saltati,
+  0 errori"), esclusi dal conteggio e dalla dimensione degli spostati.
+
+## [1.0.9] - 2026-09-29
+
+### Corretto
+
+- La correzione di v1.0.6 escludeva dalla pulizia QUALUNQUE rinomina
+  all'interno della cartella di destinazione, anche quando il file finiva in
+  una cartella diversa (es. nome cartella corretto da MediaTidy): la vecchia
+  cartella restava sul disco, vuota, senza mai essere rimossa. Ora la
+  cartella di origine viene messa in coda per la pulizia solo se è diversa
+  da quella finale, con un confronto che ignora le maiuscole (così resta
+  protetto il caso in cui il file rimane nella stessa cartella, cambiandone
+  solo la scrittura). Reso case-insensitive anche il controllo che protegge
+  le cartelle di destinazione di altri file già elaborati.
+- Serie TV: aggiungendo una release col pulsante "Aggiungi release…" (invece
+  che col trascinamento), la cartella di origine veniva memorizzata come
+  testo anziché come percorso, e con la pulizia delle cartelle attiva
+  l'episodio finiva segnato "Errore" dopo essere già stato spostato
+  correttamente. Corretto alla radice.
+
+### Modificato
+
+- Una cartella di origine che contiene solo un vecchio `poster.jpg` viene
+  ora rimossa senza chiedere conferma: il poster viene comunque riscaricato
+  nella cartella corretta, quindi quello rimasto è un residuo senza valore.
+
 ## [1.0.8] - 2026-09-29
 
 ### Corretto

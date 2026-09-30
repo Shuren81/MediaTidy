@@ -10,13 +10,15 @@ from config import VERSION
 from localization import tr
 from media_operations import format_duration, format_size, is_remote
 
+import html
+from datetime import datetime
 from pathlib import Path
 
 from qtpy.QtCore import QUrl, Qt, QTimer, Signal
 from qtpy.QtGui import QColor, QDesktopServices, QKeySequence, QPainter
 from qtpy.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QDialog, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QMenu, QPushButton, QTableWidget, QTableWidgetItem,
+    QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
     QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
 
@@ -228,48 +230,182 @@ class ToggleableListWidget(QTableWidget):
         super().keyPressEvent(event)
 
 
+STATUS_MAX_CHARS = 70
+
+
+def elide_status(text, limit=STATUS_MAX_CHARS):
+    """Accorcia il testo della colonna Stato (il testo completo resta nel tooltip): le
+    colonne non "stretch" si adattano al contenuto, quindi un messaggio lunghissimo (un
+    errore, una nota) allargherebbe la colonna Stato fino a schiacciare tutte le altre."""
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _describe_file(path):
+    """(dimensione in byte, data di modifica) di un file, o (None, None) se non leggibile."""
+    try:
+        st = Path(path).stat()
+        return st.st_size, st.st_mtime
+    except OSError:
+        return None, None
+
+
+def _file_block(title, path, size, mtime):
+    """Blocco HTML con nome, dimensione e data di un file per il dialogo duplicati."""
+    size_txt = format_size(size) if size is not None else tr("dup_unavailable")
+    date_txt = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M") if mtime is not None else tr("dup_unavailable")
+    return (f"<b>{html.escape(title)}</b><br>{html.escape(Path(path).name)}<br>"
+            f"{html.escape(tr('dup_size'))}: {html.escape(size_txt)} — "
+            f"{html.escape(tr('dup_modified'))}: {html.escape(date_txt)}<br>"
+            f"<small>{html.escape(str(path))}</small>")
+
+
 class DuplicateDialog(QDialog):
-    def __init__(self, folder, filename, dest=None, parent=None):
+    """Due file finirebbero con lo stesso nome nella destinazione: mostra origine e file
+    già presente (dimensione e data), permette di aprire le cartelle per controllare a
+    mano e chiede: Sovrascrivi / Rinomina / Salta / Annulla operazione.
+    choice: "overwrite" | "suffix" | "skip" | "cancel" (chiudere la finestra = "skip")."""
+    def __init__(self, src_path, dest, folder, filename, parent=None):
         super().__init__(parent)
         self.setWindowTitle(tr("dup_title"))
-        self.resize(560, 300)
+        self.setMinimumWidth(620)
         self.choice = "skip"
         self.apply_to_all = False
 
+        target = Path(dest) / folder / filename
+        remote = is_remote(dest)
+        src_size, src_mtime = _describe_file(src_path)
+        dst_size, dst_mtime = (None, None) if remote else _describe_file(target)
+
         lay = QVBoxLayout(self)
-        msg = tr("dup_msg", folder=folder, file=filename)
-        lbl = QLabel(msg)
-        lbl.setWordWrap(True)
-        lay.addWidget(lbl)
+        intro = QLabel(tr("dup_intro"))
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
 
-        if dest and not is_remote(dest):
-            btn_open = QPushButton(tr("btn_open_folder"))
-            btn_open.clicked.connect(lambda: _open_folder(Path(dest) / folder))
-            lay.addWidget(btn_open)
+        for title, path, size, mtime in (
+            (tr("dup_src_label"), src_path, src_size, src_mtime),
+            (tr("dup_dest_label"), target if not remote else f"{dest}: {folder}/{filename}", dst_size, dst_mtime),
+        ):
+            box = QLabel(_file_block(title, path, size, mtime))
+            box.setWordWrap(True)
+            box.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            box.setStyleSheet("QLabel { border: 1px solid #c0c0c0; border-radius: 4px; padding: 6px; }")
+            lay.addWidget(box)
 
-        btn_layout = QVBoxLayout()
-        self.btn_overwrite = QPushButton(tr("dup_opt1"))
-        self.btn_suffix = QPushButton(tr("dup_opt2"))
-        self.btn_custom = QPushButton(tr("dup_opt3"))
-        self.btn_skip = QPushButton(tr("dup_opt4"))
+        if (src_size is not None and src_size == dst_size
+                and src_mtime is not None and dst_mtime is not None
+                and abs(src_mtime - dst_mtime) < 2):
+            hint = QLabel(tr("dup_same_hint"))
+            hint.setWordWrap(True)
+            hint.setStyleSheet("QLabel { color: #b06a00; }")
+            lay.addWidget(hint)
 
-        self.btn_overwrite.clicked.connect(lambda: self._select("overwrite"))
-        self.btn_suffix.clicked.connect(lambda: self._select("suffix"))
-        self.btn_custom.clicked.connect(lambda: self._select("custom"))
-        self.btn_skip.clicked.connect(lambda: self._select("skip"))
+        open_row = QHBoxLayout()
+        btn_open_src = QPushButton(tr("dup_open_src"))
+        btn_open_src.clicked.connect(lambda: _open_folder(Path(src_path).parent))
+        open_row.addWidget(btn_open_src)
+        if not remote:
+            btn_open_dst = QPushButton(tr("dup_open_dest"))
+            btn_open_dst.clicked.connect(lambda: _open_folder(target.parent))
+            open_row.addWidget(btn_open_dst)
+        open_row.addStretch(1)
+        lay.addLayout(open_row)
 
-        btn_layout.addWidget(self.btn_overwrite)
-        btn_layout.addWidget(self.btn_suffix)
-        btn_layout.addWidget(self.btn_custom)
-        btn_layout.addWidget(self.btn_skip)
-        lay.addLayout(btn_layout)
-
-        self.chk_all = QCheckBox(tr("dup_apply_all"))
+        self.chk_all = QCheckBox(tr("dup_apply_next"))
         lay.addWidget(self.chk_all)
 
+        btn_row = QHBoxLayout()
+        self.btn_overwrite = QPushButton(tr("dup_btn_overwrite"))
+        self.btn_suffix = QPushButton(tr("dup_btn_rename"))
+        self.btn_skip = QPushButton(tr("dup_btn_skip"))
+        self.btn_cancel = QPushButton(tr("dup_btn_cancel"))
+        self.btn_overwrite.clicked.connect(lambda: self._select("overwrite"))
+        self.btn_suffix.clicked.connect(lambda: self._select("suffix"))
+        self.btn_skip.clicked.connect(lambda: self._select("skip"))
+        self.btn_cancel.clicked.connect(lambda: self._select("cancel"))
+        for b in (self.btn_overwrite, self.btn_suffix, self.btn_skip):
+            btn_row.addWidget(b)
+        btn_row.addStretch(1)
+        btn_row.addWidget(self.btn_cancel)
+        lay.addLayout(btn_row)
+
     def _select(self, choice):
+        apply_all = self.chk_all.isChecked() and choice != "cancel"
+        if choice == "overwrite" and apply_all:
+            # Sovrascrivere in automatico TUTTI i prossimi duplicati fa perdere file
+            # senza altre domande: chiede una conferma esplicita.
+            answer = QMessageBox.question(
+                self, tr("dup_confirm_overwrite_title"), tr("dup_confirm_overwrite_msg"),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
         self.choice = choice
-        self.apply_to_all = self.chk_all.isChecked()
+        self.apply_to_all = apply_all
+        self.accept()
+
+
+class BatchConflictDialog(QDialog):
+    """Più file dello stesso lotto avrebbero lo stesso nome finale. Si sceglie PRIMA di
+    spostare qualsiasi cosa. choice: "keep" (solo il file di keep_row; gli altri restano
+    nella cartella di origine) | "all" (tutti, con suffisso _1, _2...) | "skip" (nessuno)
+    | "cancel" (interrompe l'operazione). Chiudere la finestra = "skip"."""
+    def __init__(self, entries, final_name, parent=None):
+        """entries: lista di dict {"path": Path, "row": indice riga nella tabella}."""
+        super().__init__(parent)
+        self.setWindowTitle(tr("conflict_title"))
+        self.setMinimumWidth(640)
+        self.choice = "skip"
+        self.keep_row = None
+
+        lay = QVBoxLayout(self)
+        intro = QLabel(tr("conflict_intro", n=len(entries), name=final_name))
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+
+        infos = []
+        for n, e in enumerate(entries, 1):
+            size, mtime = _describe_file(e["path"])
+            infos.append((size, mtime))
+            box = QLabel(_file_block(tr("conflict_file_label", n=n), e["path"], size, mtime))
+            box.setWordWrap(True)
+            box.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            box.setStyleSheet("QLabel { border: 1px solid #c0c0c0; border-radius: 4px; padding: 6px; }")
+            lay.addWidget(box)
+            row = QHBoxLayout()
+            btn_open = QPushButton(tr("dup_open_src"))
+            btn_open.clicked.connect(lambda _=False, pth=e["path"]: _open_folder(Path(pth).parent))
+            btn_keep = QPushButton(tr("conflict_keep_this"))
+            btn_keep.clicked.connect(lambda _=False, r=e["row"]: self._select("keep", r))
+            row.addWidget(btn_open)
+            row.addWidget(btn_keep)
+            row.addStretch(1)
+            lay.addLayout(row)
+
+        sizes = {i[0] for i in infos}
+        mtimes = [i[1] for i in infos if i[1] is not None]
+        if (len(sizes) == 1 and None not in sizes and len(mtimes) == len(infos)
+                and max(mtimes) - min(mtimes) < 2):
+            hint = QLabel(tr("conflict_same_hint"))
+            hint.setWordWrap(True)
+            hint.setStyleSheet("QLabel { color: #b06a00; }")
+            lay.addWidget(hint)
+
+        btn_row = QHBoxLayout()
+        btn_all = QPushButton(tr("conflict_keep_all"))
+        btn_skip = QPushButton(tr("conflict_skip_all"))
+        btn_cancel = QPushButton(tr("dup_btn_cancel"))
+        btn_all.clicked.connect(lambda: self._select("all"))
+        btn_skip.clicked.connect(lambda: self._select("skip"))
+        btn_cancel.clicked.connect(lambda: self._select("cancel"))
+        btn_row.addWidget(btn_all)
+        btn_row.addWidget(btn_skip)
+        btn_row.addStretch(1)
+        btn_row.addWidget(btn_cancel)
+        lay.addLayout(btn_row)
+
+    def _select(self, choice, keep_row=None):
+        self.choice = choice
+        self.keep_row = keep_row
         self.accept()
 
 
@@ -364,6 +500,16 @@ class CreditsPrivacyDialog(QDialog):
         lay.addWidget(btn_close)
 
 
+def kept_folder_details(kept_folders):
+    """Righe per la tabella dei dettagli: una per ogni cartella di origine conservata,
+    con il motivo (contiene ancora file non elaborati / sottocartelle non riconosciute /
+    scelta dell'utente)."""
+    return [
+        {"name": path, "status": tr("batch_folder_kept"), "message": tr(f"batch_kept_{reason}")}
+        for path, reason in kept_folders
+    ]
+
+
 class BatchDetailsDialog(QDialog):
     """Tabella con i file saltati/in errore di un batch Esegui: nome, stato,
     messaggio. Copia riga singola o intero report, sia da bottone sia dal
@@ -439,15 +585,20 @@ class BatchSummaryDialog(QDialog):
     spostati/copiati, dimensione totale, tempo impiegato, quanti saltati e
     quanti in errore. "Vedi dettagli" apre BatchDetailsDialog con l'elenco
     di tutto ciò che NON è stato spostato/copiato con successo."""
-    def __init__(self, succeeded, total_bytes, elapsed, skipped, errors, details, parent=None):
+    def __init__(self, succeeded, total_bytes, elapsed, skipped, errors, details, already=0,
+                 kept=0, interrupted=False, unprocessed=0, parent=None):
         super().__init__(parent)
         self.details = details
-        self.setWindowTitle(tr("batch_summary_title"))
-        self.resize(460, 160)
+        self.setWindowTitle(tr("batch_summary_title_interrupted" if interrupted else "batch_summary_title"))
+        self.setMinimumWidth(480)
 
         lay = QVBoxLayout(self)
         msg = tr("batch_summary_msg", succeeded=succeeded, size=format_size(total_bytes),
-                 elapsed=format_duration(elapsed), skipped=skipped, errors=errors)
+                 elapsed=format_duration(elapsed), already=already, skipped=skipped, errors=errors)
+        if interrupted:
+            msg += "\n\n⚠ " + tr("batch_summary_interrupted", n=unprocessed)
+        if kept:
+            msg += "\n\n" + tr("batch_summary_kept", kept=kept)
         lbl = QLabel(msg)
         lbl.setWordWrap(True)
         lay.addWidget(lbl)

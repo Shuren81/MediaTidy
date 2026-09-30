@@ -15,13 +15,13 @@ from media_operations import format_size, is_remote, play_system_sound, send_min
 from text_utils import sanitize_title
 from tmdb_client import search_tv
 from core.movie_handler import (
-    DONE_KEYS, ERROR_KEYS, READY_KEYS, SIMILARITY_THRESHOLD, SKIP_KEYS, is_done,
-    norm, set_status, status_text,
+    DONE_KEYS, ERROR_KEYS, READY_KEYS, RUNNABLE_KEYS, SIMILARITY_THRESHOLD, SKIP_KEYS,
+    is_done, is_runnable, norm, refresh_batch_collisions, set_status, status_text,
 )
 from core.series_handler import SeriesWorker, collect_items_for_path, is_ready, make_item
 from ui.widgets import (
-    ITEM_ENABLED, ITEM_SELECTABLE, ROLE_USER, BatchSummaryDialog, DuplicateDialog,
-    NonEmptyDirDialog, ToggleableListWidget,
+    ITEM_ENABLED, ITEM_SELECTABLE, ROLE_USER, BatchConflictDialog, BatchSummaryDialog, elide_status, DuplicateDialog,
+    NonEmptyDirDialog, ToggleableListWidget, kept_folder_details,
 )
 
 from qtpy.QtCore import Qt, Signal
@@ -233,7 +233,7 @@ class SeriesTab(QWidget):
     def config_changed(self):
         """Chiamato da MainWindow dopo che Opzioni o Formato Nomi sono stati salvati."""
         for it in self.items:
-            if is_ready(it) or it.get("status") == "status_already_exists":
+            if it.get("status") in RUNNABLE_KEYS:
                 set_status(it, "status_to_test")
         self.radio_move.blockSignals(True)
         self.radio_copy.blockSignals(True)
@@ -288,6 +288,13 @@ class SeriesTab(QWidget):
     def known_paths(self):
         return {it["path"] for it in self.items}
 
+    def _refresh_collisions(self):
+        """Segnala i file del lotto che finirebbero con lo stesso nome (vedi
+        refresh_batch_collisions) e ridisegna le righe."""
+        refresh_batch_collisions(self.items)
+        for i in range(len(self.items)):
+            self.refresh_row(i)
+
     def remove_selected(self):
         if self._busy():
             return
@@ -295,6 +302,7 @@ class SeriesTab(QWidget):
         for r in rows:
             del self.items[r]
             self.table.removeRow(r)
+        self._refresh_collisions()
         self.update_buttons()
 
     def clear_all(self):
@@ -313,7 +321,7 @@ class SeriesTab(QWidget):
         dest_full_path = str(Path(CONFIG["dest_series"]) / it["folder"]) if it["folder"] else ""
         self.table.blockSignals(True)
         for c, text in enumerate(cells):
-            cell = QTableWidgetItem(text)
+            cell = QTableWidgetItem(elide_status(text) if c == 6 else text)
             if c == 0:
                 cell.setToolTip(str(it["path"]))
             elif c == 4 and dest_full_path:
@@ -327,7 +335,7 @@ class SeriesTab(QWidget):
                     cell.setForeground(QColor(200, 130, 0))  # arancione: verrà rinominato, non è un no-op
                 elif key in READY_KEYS or key in DONE_KEYS:
                     cell.setForeground(QColor(0, 140, 0))
-                elif key in ERROR_KEYS or key in ("status_already_exists", "series_status_unknown_ep"):
+                elif key in ERROR_KEYS or key in ("status_already_exists", "status_dup_in_batch", "series_status_unknown_ep"):
                     cell.setForeground(QColor(200, 0, 0))
                 elif key in SKIP_KEYS:
                     cell.setForeground(QColor(128, 128, 128))
@@ -557,8 +565,8 @@ class SeriesTab(QWidget):
             b.setEnabled(not busy)
 
         selected_rows = {i.row() for i in self.table.selectedIndexes()}
-        n_ready_all = sum(1 for it in self.items if is_ready(it))
-        n_ready_sel = sum(1 for i in selected_rows if is_ready(self.items[i]))
+        n_ready_all = sum(1 for it in self.items if is_runnable(it))
+        n_ready_sel = sum(1 for i in selected_rows if is_runnable(self.items[i]))
         action_word = tr("action_move_short") if CONFIG.get("action_series", "move") == "move" else tr("action_copy_short")
 
         if selected_rows:
@@ -617,12 +625,11 @@ class SeriesTab(QWidget):
             else:
                 candidates = range(len(self.items))
             candidates = list(candidates)
-            rows = [i for i in candidates if is_ready(self.items[i])]
+            # Oltre ai pronti, anche i duplicati: il programma chiede cosa fare (dialogo).
+            rows = [i for i in candidates if is_runnable(self.items[i])]
 
         if not rows:
             return
-
-        self._last_candidates = candidates if mode == "action" else []
 
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -645,6 +652,7 @@ class SeriesTab(QWidget):
         self.worker.progress.connect(self.on_progress)
         self.worker.ask.connect(self.on_ask)
         self.worker.ask_duplicate.connect(self.on_ask_duplicate)
+        self.worker.ask_conflict.connect(self.on_ask_conflict)
         self.worker.ask_non_empty_dir.connect(self.on_ask_non_empty_dir)
         self.worker.all_done.connect(lambda: self.on_done(mode))
         self.worker.finished.connect(lambda: self.update_buttons(idle=True))
@@ -708,11 +716,23 @@ class SeriesTab(QWidget):
     def on_ask_duplicate(self, row):
         self.table.selectRow(row)
         it = self.items[row]
-        dlg = DuplicateDialog(it["folder"], it["newname"], dest=CONFIG["dest_series"], parent=self)
+        dlg = DuplicateDialog(it["path"], CONFIG["dest_series"], it["folder"], it["newname"], parent=self)
         if dlg.exec_() == QDialog.Accepted:
             self.worker.provide_dup_choice(dlg.choice, dlg.apply_to_all)
         else:
+            # Finestra chiusa senza scegliere: come "Salta" (mai sovrascrivere né interrompere).
             self.worker.provide_dup_choice("skip", False)
+
+    def on_ask_conflict(self, rows):
+        """Doppioni dentro lo stesso lotto: si decide prima di spostare qualsiasi cosa."""
+        self.table.selectRow(rows[0])
+        entries = [{"path": self.items[r]["path"], "row": r} for r in rows]
+        dlg = BatchConflictDialog(entries, self.items[rows[0]]["newname"], parent=self)
+        if dlg.exec_() == QDialog.Accepted:
+            self.worker.provide_conflict_choice(dlg.choice, dlg.keep_row)
+        else:
+            # Finestra chiusa senza scegliere: nessuno dei due viene spostato.
+            self.worker.provide_conflict_choice("skip", None)
 
     def on_ask_non_empty_dir(self, row, folder_path, size_str):
         self.table.selectRow(row)
@@ -724,6 +744,8 @@ class SeriesTab(QWidget):
 
     def on_done(self, mode):
         self.progress_bar.setVisible(False)
+        if mode == "test":
+            self._refresh_collisions()
         ready = sum(1 for it in self.items if is_ready(it))
         done = sum(1 for it in self.items if it.get("status") in DONE_KEYS)
 
@@ -731,9 +753,11 @@ class SeriesTab(QWidget):
             msg = tr("done_test", ready=ready)
             self._show_status(msg)
         else:
-            msg = tr("done_action", done=done)
-            play_system_sound()
-            send_mint_notification(tr("notif_title"), tr("notif_body", done=done))
+            cancelled = bool(self.worker and self.worker.cancelled)
+            msg = tr("done_action_cancelled" if cancelled else "done_action", done=done)
+            if not cancelled:
+                play_system_sound()
+                send_mint_notification(tr("notif_title"), tr("notif_body", done=done))
             if self.worker and self.worker.did_unmount:
                 msg += tr("unmounted_msg")
             self._show_status(msg)
@@ -742,24 +766,17 @@ class SeriesTab(QWidget):
         self.update_buttons(idle=True)
 
     def _show_batch_summary(self):
-        """Riepilogo di fine batch (solo dopo Esegui): il Worker traccia già i suoi
-        saltati/errori, ma i "già esistenti" (rossi) erano esclusi dal Worker fin
-        dall'inizio (mai entrati in rows) — li recupero qui da _last_candidates,
-        con lo stesso ambito (selezionati/tutti) che era stato cliccato."""
+        """Riepilogo di fine batch (solo dopo Esegui): quanti spostati/copiati, già a posto,
+        saltati, errori; se il lavoro è stato interrotto dall'utente e quanti file non sono
+        stati elaborati; quali cartelle di origine sono state conservate e perché."""
         if not self.worker:
             return
-        already_existing = [i for i in self._last_candidates
-                             if self.items[i].get("status") == "status_already_exists"]
-        extra_details = [
-            {"name": self.items[i]["path"].name, "status": tr("status_already_exists"),
-             "message": tr("status_already_exists")}
-            for i in already_existing
-        ]
-        skipped = self.worker.skipped_count + len(already_existing)
-        details = self.worker.result_details + extra_details
+        w = self.worker
+        details = list(w.result_details) + kept_folder_details(w.kept_folders)
         dlg = BatchSummaryDialog(
-            self.worker.succeeded_count, self.worker.total_bytes, self.worker.elapsed,
-            skipped, self.worker.error_count, details, self,
+            w.succeeded_count, w.total_bytes, w.elapsed, w.skipped_count, w.error_count, details,
+            already=w.already_count, kept=len(w.kept_folders),
+            interrupted=w.cancelled, unprocessed=w.unprocessed_count, parent=self,
         )
         dlg.exec_()
 

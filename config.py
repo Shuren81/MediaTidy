@@ -15,7 +15,7 @@ from pathlib import Path
 from qtpy.QtCore import QSettings
 
 APP_NAME = "MediaTidy"
-VERSION = "1.0.8"
+VERSION = "1.0.14"
 
 DEFAULT_LOGS_DIR = str(Path.home() / ".local" / "share" / "MediaTidy" / "logs")
 
@@ -52,6 +52,7 @@ CONFIG = {
     "series_include_tmdb_id": True,
     "series_include_country": True,
     "series_include_episode_title": True,
+    "series_year_in_filename": False,
     "series_download_show_poster": True,
     "series_download_season_poster": True,
 }
@@ -87,6 +88,7 @@ def load_config():
     CONFIG["series_include_tmdb_id"] = _settings.value("series_include_tmdb_id", True, type=bool)
     CONFIG["series_include_country"] = _settings.value("series_include_country", True, type=bool)
     CONFIG["series_include_episode_title"] = _settings.value("series_include_episode_title", True, type=bool)
+    CONFIG["series_year_in_filename"] = _settings.value("series_year_in_filename", False, type=bool)
     CONFIG["series_download_show_poster"] = _settings.value("series_download_show_poster", True, type=bool)
     CONFIG["series_download_season_poster"] = _settings.value("series_download_season_poster", True, type=bool)
 

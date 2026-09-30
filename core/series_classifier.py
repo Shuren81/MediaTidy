@@ -160,7 +160,11 @@ def classify_directory(files, dir_name=""):
         else:
             pending.append(e)
 
-    # File con codice proprio: uno per episodio, gli altri con lo stesso codice sono clip
+    # File con codice proprio: il più grande è l'episodio. Gli altri con lo stesso codice
+    # sono clip SOLO se sembrano davvero dei sample (parola da clip nel nome, oppure molto
+    # più piccoli, sotto SMALL_RATIO): una seconda versione di dimensione simile (720p
+    # accanto a 1080p, un repack...) resta in lista come episodio, così il doppione
+    # viene segnalato all'utente invece di essere scartato in silenzio.
     by_code = {}
     for e in pending:
         if e["own"]:
@@ -168,10 +172,16 @@ def classify_directory(files, dir_name=""):
     main_sizes = []
     for code, group in by_code.items():
         group.sort(key=lambda x: x["size"], reverse=True)
-        put(group[0], "episode", "codice episodio nel nome del file")
-        main_sizes.append(group[0]["size"])
+        main = group[0]
+        put(main, "episode", "codice episodio nel nome del file")
+        main_sizes.append(main["size"])
         for other in group[1:]:
-            put(other, "clip", "stesso episodio di un file più grande (probabile sample)")
+            if other["name_clip"]:
+                put(other, "clip", "stesso episodio, il nome contiene una parola da clip (sample, trailer, ...)")
+            elif other["size"] < SMALL_RATIO * main["size"]:
+                put(other, "clip", "stesso episodio di un file molto più grande (probabile sample)")
+            else:
+                put(other, "episode", "altra versione dello stesso episodio (dimensione simile)")
 
     # File senza codice proprio
     nocode = [e for e in pending if not e["own"]]

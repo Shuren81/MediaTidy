@@ -81,7 +81,7 @@ Da **Formato Nomi**, separatamente per Film e per Serie TV:
 - La modalità titolo (solo originale, solo localizzato, o entrambi in un ordine
   o nell’altro).
 - Cosa includere nel nome/cartella (ID TMDB, paese, regista, titolo
-  dell’episodio, download del poster).
+  dell’episodio, anno della serie nel nome del file, download del poster).
 
 ## Log e CSV
 

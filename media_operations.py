@@ -32,6 +32,28 @@ JUNK_SUBFOLDER_NAMES = frozenset({
     "sample", "screens", "screenshots", "proof", "subs", "subtitles",
     "extras", "featurettes", "artwork", "covers", "scans",
 })
+
+# File residui "noti" che, da soli, non giustificano il prompt di conferma:
+# una cartella di origine che contiene SOLO questi viene rimossa in silenzio.
+SILENT_LEFTOVER_FILES = frozenset({"poster.jpg"})
+
+
+def only_known_leftovers(folder):
+    """True se la cartella contiene solo file residui noti (es. il vecchio poster.jpg,
+    che viene comunque riscaricato nella cartella corretta)."""
+    try:
+        children = list(Path(folder).iterdir())
+    except OSError:
+        return False
+    return bool(children) and all(
+        c.is_file() and c.name.casefold() in SILENT_LEFTOVER_FILES for c in children
+    )
+
+
+def same_folder_ci(a, b):
+    """Confronta due percorsi di cartella ignorando le maiuscole: su un filesystem
+    case-insensitive "3 Men and a..." e "3 Men And A..." sono la stessa cartella."""
+    return os.path.abspath(str(a)).casefold() == os.path.abspath(str(b)).casefold()
 COPY_CHUNK = 4 * 1024 * 1024
 
 LOG_RETENTION_DAYS = 10

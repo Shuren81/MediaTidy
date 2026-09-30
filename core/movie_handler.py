@@ -16,7 +16,7 @@ from pathlib import Path
 from config import CONFIG
 from localization import tr
 from media_operations import (
-    JUNK_SUBFOLDER_NAMES, VIDEO_EXT, cleanup_old_logs, download_poster,
+    JUNK_SUBFOLDER_NAMES, only_known_leftovers, same_folder_ci, VIDEO_EXT, cleanup_old_logs, download_poster,
     find_fstab_mountpoint, get_dir_size, format_size, is_inplace_source, is_remote,
     is_same_file, is_same_physical_file, log_csv_row, log_event, mount_share,
     move_or_copy_file, target_exists, unmount_share,
@@ -40,9 +40,16 @@ READY_KEYS = frozenset({
     "status_ready", "status_ready_inplace", "status_ready_inplace_rename",
     "status_ready_custom", "status_ready_overwrite", "status_ready_suffix",
 })
-DONE_KEYS = frozenset({"status_done_moved", "status_done_copied", "status_done_inplace"})
-SKIP_KEYS = frozenset({"status_skipped", "status_skipped_dup"})
+DONE_KEYS = frozenset({"status_done_moved", "status_done_copied", "status_done_inplace", "status_done_already"})
+SKIP_KEYS = frozenset({"status_skipped", "status_skipped_dup", "status_skipped_discarded"})
 ERROR_KEYS = frozenset({"status_error", "status_tmdb_error"})
+# Elementi che "Esegui" prende in carico: i pronti, più i duplicati (già presenti a
+# destinazione, o con lo stesso nome di un altro file del lotto): per questi il
+# programma chiede cosa fare al momento dell'esecuzione.
+RUNNABLE_KEYS = READY_KEYS | frozenset({"status_already_exists", "status_dup_in_batch"})
+# Stati tra cui cercare due file dello stesso lotto che finirebbero con lo stesso nome.
+COLLISION_CANDIDATE_KEYS = frozenset({"status_ready", "status_ready_custom",
+                                       "status_ready_inplace_rename", "status_dup_in_batch"})
 
 CSV_HEADER = ["Data e ora", "File originale", "Titolo originale TMDB",
               "Titolo localizzato TMDB", "Anno", "ID TMDB",
@@ -65,8 +72,37 @@ def is_ready(it):
     return it.get("status") in READY_KEYS
 
 
+def is_runnable(it):
+    return it.get("status") in RUNNABLE_KEYS
+
+
 def is_done(it):
     return it.get("status") in DONE_KEYS
+
+
+def refresh_batch_collisions(items):
+    """Segnala i file dello stesso lotto che, una volta rinominati, avrebbero lo stesso
+    nome (stessa cartella + stesso nome file, ignorando le maiuscole) anche se sul disco
+    non c'è ancora nulla: senza questo controllo il Test li mostrerebbe entrambi verdi e
+    il conflitto emergerebbe solo a metà lavoro. Toglie il segnale a chi non è più in
+    conflitto (es. dopo la rimozione dell'altro file). Ritorna quanti file sono segnalati."""
+    groups = {}
+    for i, it in enumerate(items):
+        if it.get("status") in COLLISION_CANDIDATE_KEYS and it.get("newname"):
+            key = (str(it.get("folder", "")).casefold(), it["newname"].casefold())
+            groups.setdefault(key, []).append(i)
+    flagged = 0
+    for idxs in groups.values():
+        if len(idxs) > 1:
+            for i in idxs:
+                if items[i].get("status") != "status_dup_in_batch":
+                    set_status(items[i], "status_dup_in_batch")
+                flagged += 1
+        else:
+            i = idxs[0]
+            if items[i].get("status") == "status_dup_in_batch":
+                set_status(items[i], "status_to_test")
+    return flagged
 
 
 def is_sample(f):
@@ -172,7 +208,75 @@ def build_names(info, ext, cap_rule=None):
     return folder, base + ext.lower()
 
 
-class MovieWorker(QThread):
+class BatchConflictMixin:
+    """Doppioni DENTRO lo stesso lotto: più file che, una volta rinominati, avrebbero lo
+    stesso nome finale. Si chiede PRIMA di spostare qualsiasi cosa: chi viene scartato
+    resta intatto nella cartella di origine (mai cancellato da una sovrascrittura).
+    Serve nella classe worker: DEST_KEY, ask_conflict (Signal(list)), _evt, _answer."""
+
+    def provide_conflict_choice(self, choice, keep_row=None):
+        self._answer = (choice, keep_row)
+        self._evt.set()
+
+    def _ask_conflict(self, rows):
+        self._answer = None
+        self._evt.clear()
+        self.ask_conflict.emit(list(rows))
+        self._evt.wait()
+        return self._answer or ("skip", None)
+
+    def _resolve_batch_conflicts(self):
+        groups = {}
+        for i in self.rows:
+            it = self.items[i]
+            key = (str(it.get("folder", "")).casefold(), str(it.get("newname", "")).casefold())
+            groups.setdefault(key, []).append(i)
+        decisions = []
+        for rows in groups.values():
+            if len(rows) < 2:
+                continue
+            choice, keep = self._ask_conflict(rows)
+            if choice == "cancel":
+                self.cancelled = True  # nulla è stato ancora toccato
+                return
+            decisions.append((rows, choice, keep))
+        # Le decisioni si applicano solo a fine domande: con un "Annulla" non cambia nulla.
+        for rows, choice, keep in decisions:
+            if choice == "keep":
+                for j in rows:
+                    if j != keep:
+                        # Scartato PER SCELTA dell'utente: a differenza di un "salta" non protegge
+                        # più la sua cartella di origine (vedi _has_pending_files).
+                        set_status(self.items[j], "status_skipped_discarded")
+            elif choice == "all":
+                self._suffix_group(rows)
+            else:
+                for j in rows:
+                    set_status(self.items[j], "status_skipped_dup", tr("batch_msg_conflict_skipped"))
+
+    def _suffix_group(self, rows):
+        """Tiene tutti: il primo conserva il nome, gli altri prendono _1, _2... (senza
+        collidere con la destinazione né con gli altri file del lotto)."""
+        dest = CONFIG[self.DEST_KEY]
+        used = {(str(self.items[j].get("folder", "")).casefold(), str(self.items[j].get("newname", "")).casefold())
+                for j in self.rows}
+        for j in rows[1:]:
+            it = self.items[j]
+            p = Path(it["newname"])
+            count = 1
+            while True:
+                cand = f"{p.stem}_{count}{p.suffix}"
+                key = (str(it.get("folder", "")).casefold(), cand.casefold())
+                if key not in used and not target_exists(dest, it["folder"], cand):
+                    break
+                count += 1
+            it["newname"] = cand
+            used.add(key)
+
+
+class MovieWorker(BatchConflictMixin, QThread):
+    DEST_KEY = "dest_movies"
+    ask_conflict = Signal(list)
     row_update = Signal(int)
     progress = Signal(int, int)
     file_progress = Signal(int)
@@ -208,9 +312,13 @@ class MovieWorker(QThread):
         self.total_bytes = 0
         self.elapsed = 0.0
         self.succeeded_count = 0
+        self.already_count = 0
         self.skipped_count = 0
         self.error_count = 0
         self.result_details = []  # [{"name", "status", "message"}, ...]
+        self.cancelled = False       # l'utente ha scelto "Annulla" nel dialogo duplicati
+        self.unprocessed_count = 0   # file non elaborati a causa dell'annullamento
+        self.kept_folders = []       # [(percorso, motivo)] cartelle di origine NON rimosse
 
     def provide(self, movie):
         self._answer = movie
@@ -218,8 +326,8 @@ class MovieWorker(QThread):
 
     def provide_dup_choice(self, choice, apply_to_all):
         self._answer = choice
-        # "custom" richiede un intervento per ogni file: non ha senso "applica a tutti"
-        if apply_to_all and choice != "custom":
+        # "Annulla" non si applica mai "a tutti": interrompe subito il lavoro.
+        if apply_to_all and choice in ("overwrite", "suffix", "skip"):
             self.default_dup_action = choice
         self._evt.set()
 
@@ -291,7 +399,12 @@ class MovieWorker(QThread):
             self.error.emit(str(e))
             return
         total = len(self.rows)
+        if self.mode == "action":
+            self._resolve_batch_conflicts()
+        n = 1
         for n, i in enumerate(self.rows, 1):
+            if self.cancelled:
+                break
             it = self.items[i]
             self.progress.emit(n, total)
             try:
@@ -302,6 +415,8 @@ class MovieWorker(QThread):
             except Exception as e:
                 set_status(it, "status_error", str(e))
                 log_event("ERROR", f"[Film] {it.get('path', '')}: {e}")
+            if self.cancelled:
+                break
             key = it.get("status", "")
             if self.mode == "action":
                 if key in ERROR_KEYS:
@@ -312,10 +427,16 @@ class MovieWorker(QThread):
                     })
                 elif key in SKIP_KEYS:
                     self.skipped_count += 1
+                    if self.clean_parent and self.action == "move":
+                        # Mai cancellata (contiene ancora il file saltato), ma va valutata
+                        # così compare nel riepilogo tra le cartelle conservate, col motivo.
+                        self._cleanup_dirs.setdefault(Path(it["path"]).parent, i)
                     self.result_details.append({
                         "name": it["path"].name, "status": tr(key),
                         "message": it.get("status_detail") or tr(key),
                     })
+                elif key == "status_done_already":
+                    self.already_count += 1
                 elif key in DONE_KEYS:
                     self.succeeded_count += 1
             text = status_text(it)
@@ -327,6 +448,16 @@ class MovieWorker(QThread):
                          it.get("tmdb_id", ""), it.get("newname", ""),
                          it.get("folder", ""), tr(key) if key else "", it.get("status_detail", "")])
             self.row_update.emit(i)
+
+        if self.cancelled:
+            remaining = self.rows[n - 1:]
+            self.unprocessed_count = len(remaining)
+            for j in remaining:
+                self.result_details.append({
+                    "name": self.items[j]["path"].name, "status": tr("status_not_processed"),
+                    "message": tr("batch_msg_cancelled"),
+                })
+            log_event("INFO", f"[Film] Interrotto dall'utente: {self.unprocessed_count} file non elaborati")
 
         if self.mode == "action" and self.clean_parent and self.action == "move":
             try:
@@ -349,7 +480,7 @@ class MovieWorker(QThread):
     def _has_pending_files(self, folder):
         """True se nella cartella (o sotto) c'è ancora un file della lista non elaborato."""
         for it in self.items:
-            if is_done(it):
+            if is_done(it) or it.get("status") == "status_skipped_discarded":
                 continue
             try:
                 p = Path(it["path"])
@@ -371,7 +502,8 @@ class MovieWorker(QThread):
                 target = (Path(dest) / it.get("folder", "") / it["newname"]).resolve()
             except OSError:
                 continue
-            if folder == target.parent or folder in target.parents:
+            f = str(folder).casefold()
+            if any(f == str(p).casefold() for p in (target.parent, *target.parents)):
                 return True
         return False
 
@@ -394,11 +526,18 @@ class MovieWorker(QThread):
                     continue
                 if dest_root and (folder == dest_root or folder in dest_root.parents):
                     continue
-                if self._has_pending_files(folder) or self._is_target_folder(folder):
+                if self._has_pending_files(folder):
+                    self.kept_folders.append((str(folder), "pending"))
+                    continue
+                if self._is_target_folder(folder):
                     continue
                 if not any(folder.iterdir()):
                     folder.rmdir()
                     log_event("INFO", f"[Film] Cartella di origine vuota rimossa: {folder}")
+                    continue
+                if only_known_leftovers(folder):
+                    shutil.rmtree(folder)
+                    log_event("INFO", f"[Film] Cartella di origine rimossa (conteneva solo poster.jpg): {folder}")
                     continue
                 if any(child.is_dir() for child in folder.iterdir()):
                     subdirs = [child for child in folder.iterdir() if child.is_dir()]
@@ -409,11 +548,14 @@ class MovieWorker(QThread):
                         # correlato (un'altra cartella della libreria). Non la proponiamo MAI
                         # in cancellazione, nemmeno con conferma.
                         log_event("INFO", f"[Film] Cartella di origine conservata (sottocartelle non riconosciute: {unknown}): {folder}")
+                        self.kept_folders.append((str(folder), "unknown_subdirs"))
                         continue
                 choice = self._ask_non_empty_dir(row, str(folder), format_size(get_dir_size(folder)))
                 if choice == "yes":
                     shutil.rmtree(folder)
                     log_event("INFO", f"[Film] Cartella di origine rimossa con residui: {folder}")
+                else:
+                    self.kept_folders.append((str(folder), "user"))
             except Exception as e:
                 log_event("WARNING", f"[Film] Pulizia di {folder} non riuscita: {e}")
 
@@ -469,6 +611,8 @@ class MovieWorker(QThread):
             set_status(it, "status_ready")
 
     def _process(self, i, it):
+        if it.get("status") in ("status_skipped_dup", "status_skipped_discarded"):
+            return  # già deciso nel dialogo dei doppioni del lotto: il file resta dov'è
         dest = CONFIG["dest_movies"]
         while True:
             if (is_same_file(it["path"], dest, it["folder"], it["newname"])
@@ -478,10 +622,11 @@ class MovieWorker(QThread):
                 break
 
             dup_choice = self._ask_duplicate(i)
-            if dup_choice == "custom":
-                # La GUI ha già applicato (o annullato -> "skip") la modifica: si ricontrolla
-                # che il nuovo nome non esista a sua volta.
-                continue
+            if dup_choice == "cancel":
+                # Interrompe tutto il lavoro: questo file (e i successivi) restano intatti,
+                # nel dialogo nessuna operazione su disco era ancora iniziata.
+                self.cancelled = True
+                return
             if dup_choice == "suffix":
                 p = Path(it["newname"])
                 base = p.stem
@@ -494,6 +639,13 @@ class MovieWorker(QThread):
             if dup_choice == "overwrite":
                 break
             set_status(it, "status_skipped_dup")  # "skip" o dialogo chiuso
+            return
+
+        if is_same_file(it["path"], dest, it["folder"], it["newname"]):
+            # Già esattamente al suo posto (nome e cartella identici): nessuna
+            # operazione su disco, niente poster, niente pulizia. Stato dedicato,
+            # contato a parte nel riepilogo (non come "spostato").
+            set_status(it, "status_done_already")
             return
 
         inplace = is_inplace_source(it["path"], dest)
@@ -521,9 +673,10 @@ class MovieWorker(QThread):
             set_status(it, "status_done_moved" if self.action == "move" else "status_done_copied")
         self.total_bytes += src_size
 
-        if self.clean_parent and self.action == "move" and not rename:
-            # Mai in coda per la pulizia se il file è stato rinominato SUL POSTO (stessa
-            # cartella): non è mai "uscito" da lì, quella cartella è casa sua, non un
-            # residuo da abbandonare. Vale sia per il no-op sia per la correzione
-            # maiuscole/formato: "rename" copre già entrambi i casi in-place.
-            self._cleanup_dirs.setdefault(src_parent, i)
+        if self.clean_parent and self.action == "move":
+            # In coda per la pulizia solo se il file è davvero finito in una cartella
+            # DIVERSA (confronto senza maiuscole): se è rimasto nella stessa, anche solo
+            # cambiandone la scrittura, quella cartella è casa sua e non va mai proposta.
+            target_dir = Path(dest) / it["folder"]
+            if not same_folder_ci(src_parent, target_dir):
+                self._cleanup_dirs.setdefault(src_parent, i)
