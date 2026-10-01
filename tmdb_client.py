@@ -9,12 +9,13 @@ per film ("/movie", "/search/movie") e per serie TV ("/tv", "/search/tv",
 """
 from config import CONFIG
 from media_operations import redact
+from tmdb_key import effective_api_key
 
 import requests
 
 
 def tmdb(path, **params):
-    params["api_key"] = CONFIG["api_key"]
+    params["api_key"] = effective_api_key()
     try:
         r = requests.get(f"https://api.themoviedb.org/3{path}", params=params, timeout=15)
         if r.status_code == 401:

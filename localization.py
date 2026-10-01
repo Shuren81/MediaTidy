@@ -40,7 +40,8 @@ STRINGS = {
 
         "opts_title": "Opzioni e Configurazione",
         "tmdb_key": "Chiave API TMDB:",
-        "tmdb_link_help": "Non hai una chiave? <a href='https://developer.themoviedb.org/docs/getting-started'>Ottienila qui (Guida TMDB)</a>",
+        "tmdb_key_placeholder": "Facoltativa: vuoto = chiave predefinita",
+        "tmdb_link_help": "Non serve: se lasci il campo vuoto MediaTidy usa la sua chiave predefinita. Per usare la tua: <a href='https://developer.themoviedb.org/docs/getting-started'>Ottienila qui (Guida TMDB)</a>",
         "dest_folder": "Destinazione:",
         "browse": "Sfoglia…",
         "tmdb_search_lang": "Lingua di ricerca TMDB:",
@@ -132,7 +133,7 @@ STRINGS = {
         "lang_label": "Lingua:",
 
         "missing_key_title": "Chiave Mancante",
-        "missing_key_msg": "Inserisci la chiave API di TMDB nelle Opzioni.",
+        "missing_key_msg": "Nessuna chiave API TMDB disponibile: inserisci la tua nelle Opzioni.",
         "missing_dest_title": "Destinazione Mancante",
         "missing_dest_msg": "Indica la cartella di destinazione nelle Opzioni.",
         "done_test": "Test completato: {ready} file pronti",
@@ -270,7 +271,8 @@ STRINGS = {
 
         "opts_title": "Options & Settings",
         "tmdb_key": "TMDB API Key:",
-        "tmdb_link_help": "Don't have a key? <a href='https://developer.themoviedb.org/docs/getting-started'>Get it here (TMDB Guide)</a>",
+        "tmdb_key_placeholder": "Optional: empty = default key",
+        "tmdb_link_help": "Not needed: if you leave the field empty MediaTidy uses its default key. To use your own: <a href='https://developer.themoviedb.org/docs/getting-started'>Get it here (TMDB Guide)</a>",
         "dest_folder": "Destination:",
         "browse": "Browse…",
         "tmdb_search_lang": "TMDB Search Language:",
@@ -362,7 +364,7 @@ STRINGS = {
         "lang_label": "Language:",
 
         "missing_key_title": "Missing API Key",
-        "missing_key_msg": "Please enter your TMDB API Key in Options.",
+        "missing_key_msg": "No TMDB API key available: please enter yours in Options.",
         "missing_dest_title": "Missing Destination",
         "missing_dest_msg": "Please set the destination folder in Options.",
         "done_test": "Test completed: {ready} files ready",

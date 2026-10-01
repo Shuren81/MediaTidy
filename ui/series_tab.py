@@ -10,6 +10,7 @@ import difflib
 import shutil
 
 from config import CONFIG
+from tmdb_key import has_api_key
 from localization import tr
 from media_operations import format_size, is_remote, play_system_sound, send_mint_notification
 from text_utils import sanitize_title
@@ -608,7 +609,7 @@ class SeriesTab(QWidget):
             b.setEnabled(False)
 
     def start(self, mode, scope="selected"):
-        if mode == "test" and not CONFIG["api_key"].strip():
+        if mode == "test" and not has_api_key():
             QMessageBox.warning(self, tr("missing_key_title"), tr("missing_key_msg"))
             return
         if not CONFIG["dest_series"].strip():

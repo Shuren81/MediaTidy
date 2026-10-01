@@ -541,7 +541,7 @@ class CreditsPrivacyDialog(QDialog):
         <ul>
             <li><b>Nessuna raccolta dati:</b> Il software non raccoglie, memorizza o invia alcun dato personale o file a server di terze parti.</li>
             <li><b>Utilizzo API TMDB:</b> L'unica connessione di rete effettuata dall'applicazione avviene verso le API ufficiali di <b>TMDB (The Movie Database)</b> esclusivamente per interrogare e scaricare i metadati (film e serie TV) e i poster relativi ai file video selezionati dall'utente.</li>
-            <li><b>Chiave API:</b> La chiave API inserita dall'utente viene memorizzata esclusivamente in locale tramite il sistema di configurazione nativo.</li>
+            <li><b>Chiave API:</b> Se inserisci una tua chiave API TMDB, viene memorizzata esclusivamente in locale tramite il sistema di configurazione nativo. Se non ne inserisci una, MediaTidy usa una chiave predefinita dello sviluppatore, incorporata nel programma: le richieste verso TMDB partono dal tuo computer come con una chiave personale, e la chiave predefinita non viene mai salvata nelle tue impostazioni né scritta nei log.</li>
         </ul>
         """
         browser_priv = QTextBrowser()

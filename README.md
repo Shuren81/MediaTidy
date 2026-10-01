@@ -232,9 +232,17 @@ Se viene configurata una destinazione remota (solo su Linux), MediaTidy usa SSH 
 
 ### Chiave API TMDB
 
-La chiave API TMDB viene usata esclusivamente per autenticare le richieste a TMDB. Il programma tenta di mascherarla nei messaggi di errore, nei log e nei CSV.
+MediaTidy include una chiave API TMDB predefinita, quindi funziona subito. Se
+vuoi puoi inserire la tua nelle Opzioni: ha la precedenza e viene salvata solo
+sul tuo computer. La chiave predefinita non è salvata nelle impostazioni e non
+compare nei log né nei CSV. Il programma tenta di mascherare qualsiasi chiave
+nei messaggi di errore.
 
-Non pubblicare mai la chiave API in repository, screenshot, log o segnalazioni di bug.
+Se esegui MediaTidy da sorgente non c'è una chiave predefinita: servono la tua
+chiave, oppure la variabile d'ambiente `TMDB_API_KEY`.
+
+Non pubblicare mai la tua chiave API in repository, screenshot, log o
+segnalazioni di bug.
 
 ## Stato del progetto
 

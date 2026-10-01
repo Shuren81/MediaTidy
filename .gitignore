@@ -36,3 +36,6 @@ build/
 dist/
 tools/
 *.spec
+
+# Chiave TMDB predefinita incorporata dalla build (scripts/embed_key.py): MAI nel repository
+_runtime_data.py

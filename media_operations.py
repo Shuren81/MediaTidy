@@ -20,6 +20,7 @@ from pathlib import Path
 import requests
 
 from config import CONFIG
+from tmdb_key import secret_keys
 from platform_utils import (
     IS_LINUX, default_log_dir, looks_like_windows_path, notify, path_too_long,
     play_done_sound, supports_fstab_mount, supports_remote,
@@ -90,10 +91,12 @@ def get_log_dir():
     return default_log_dir()
 
 def redact(text):
-    """Nasconde la chiave API TMDB in qualsiasi testo destinato a UI, log o CSV."""
+    """Nasconde le chiavi API TMDB (quella dell'utente e quella predefinita della build)
+    in qualsiasi testo destinato a UI, log o CSV."""
     text = str(text)
-    key = (CONFIG.get("api_key") or "").strip()
-    return text.replace(key, "***") if len(key) >= 8 else text
+    for key in secret_keys():
+        text = text.replace(key, "***")
+    return text
 
 
 def _daily_log_path():
@@ -153,7 +156,7 @@ def log_csv_row(kind, header, values):
             if new_file:
                 writer.writerow(header)
 
-            writer.writerow(values)
+            writer.writerow([redact(v) if isinstance(v, str) else v for v in values])
 
     except Exception as error:
         log_event("ERROR", f"Impossibile aggiornare il CSV {kind}: {error}")

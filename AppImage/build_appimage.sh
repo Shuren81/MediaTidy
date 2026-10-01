@@ -59,6 +59,16 @@ chmod +x "${APPIMAGETOOL}"
 
 source "${ROOT_DIR}/venv/bin/activate"
 
+# Chiave TMDB predefinita: se la variabile TMDB_API_KEY è impostata (es. export
+# TMDB_API_KEY=...) viene incorporata, mascherata, nel pacchetto. Il file generato
+# (_runtime_data.py) è ignorato da git e non va mai committato.
+if [[ -n "${TMDB_API_KEY:-}" ]]; then
+    echo "==> Incorporo la chiave TMDB predefinita..."
+    python "${ROOT_DIR}/scripts/embed_key.py"
+else
+    echo "==> Nessuna TMDB_API_KEY impostata: il pacchetto non conterrà la chiave predefinita."
+fi
+
 rm -rf "${BUILD_DIR}" "${DIST_DIR}" "${ROOT_DIR}/${APP_NAME}.spec"
 
 echo "==> Aggiorno pip..."

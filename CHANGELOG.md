@@ -4,6 +4,26 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
+## [1.1.2] - 2026-10-01
+
+### Aggiunto
+
+- Chiave API TMDB predefinita: se il campo nelle Opzioni è vuoto, MediaTidy
+  usa la chiave dello sviluppatore, quindi non serve più registrarsi su TMDB.
+  Chi vuole può inserire la propria, che ha la precedenza.
+- La chiave predefinita non è nel repository: la build la incorpora dal secret
+  `TMDB_API_KEY` (`scripts/embed_key.py`), mascherata, in un file generato
+  ignorato da git. Le release falliscono se il secret manca.
+- Test automatici su scelta, mascheratura e riservatezza della chiave.
+
+### Modificato
+
+- La chiave non viene mai salvata nelle impostazioni, mostrata nelle Opzioni o
+  scritta nei log: oltre ai messaggi d'errore, ora anche log e CSV la
+  oscurano.
+- Opzioni, messaggio di chiave mancante e informativa sulla privacy
+  aggiornati.
+
 ## [1.1.1] - 2026-10-01
 
 Versione dichiarata completa: da qui in avanti solo correzioni per i problemi segnalati.

@@ -29,6 +29,7 @@ class SettingsDialog(QDialog):
         # Chiave API TMDB
         self.api_input = QLineEdit(CONFIG["api_key"])
         self.api_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_input.setPlaceholderText(tr("tmdb_key_placeholder"))  # vuoto = chiave predefinita
         layout.addRow(tr("tmdb_key"), self.api_input)
 
         help_label = QLabel(
