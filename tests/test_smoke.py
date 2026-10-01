@@ -80,6 +80,29 @@ def test_icon_is_found():
     assert pu.resource_path("MT_Icon.png").is_file()
 
 
+def test_tmdb_attribution_in_credits(app):
+    """I termini d'uso di TMDB richiedono, nei Crediti, il suo logo ufficiale e la frase
+    di non approvazione. Il logo deve essere nel pacchetto e disegnarsi su ogni sistema."""
+    from qtpy.QtWidgets import QTextBrowser
+    from ui.widgets import CreditsPrivacyDialog, TMDB_LOGO_SIZE, tmdb_logo_icon
+
+    assert pu.resource_path("assets/tmdb_logo.svg").is_file()
+
+    icon = tmdb_logo_icon()
+    assert icon is not None, "logo TMDB non disegnabile (file mancante o QtSvg assente)"
+    image = icon.pixmap(TMDB_LOGO_SIZE).toImage()
+    assert not image.isNull()
+    # Il logo è un disegno con tratti colorati su sfondo trasparente: deve avere pixel visibili.
+    visible = sum(1 for x in range(0, image.width(), 2) for y in range(0, image.height(), 2)
+                  if image.pixelColor(x, y).alpha() > 0)
+    assert visible > 50
+
+    dlg = CreditsPrivacyDialog()
+    text = " ".join(b.toPlainText() for b in dlg.findChildren(QTextBrowser))
+    assert "This product uses the TMDB API but is not endorsed or certified by TMDB." in text
+    assert dlg.btn_tmdb_logo.icon().isNull() is False
+
+
 def test_platform_rules():
     # Una lettera di unità di Windows non è mai una destinazione SSH.
     assert mo.is_remote(r"D:\Film") is False

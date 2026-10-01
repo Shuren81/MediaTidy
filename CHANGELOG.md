@@ -4,6 +4,21 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
+## [1.1.1] - 2026-10-01
+
+Versione dichiarata completa: da qui in avanti solo correzioni per i problemi segnalati.
+
+### Aggiunto
+
+- Logo ufficiale di TMDB nella finestra Crediti, in dimensione ridotta e
+  cliccabile, accanto alla frase di attribuzione. È richiesto dai termini
+  d'uso dell'API TMDB. Il logo (`assets/tmdb_logo.svg`) è usato senza
+  modifiche ed è incluso nei pacchetti per Windows, macOS e Linux.
+- Test automatico che verifica la presenza del logo e della frase di
+  attribuzione su tutti e tre i sistemi.
+- Aggiunto il file `LICENSE` con il testo della licenza MIT; prima la sezione
+  Licenza del README riportava "Da definire".
+
 ## [1.1.0] - 2026-10-01
 
 Prima versione preparata per Windows e macOS, oltre a Linux.

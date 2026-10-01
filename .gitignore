@@ -30,3 +30,9 @@ __pycache__/
 # Impostazioni locali di Geany
 .geany/
 *.AppImage
+
+# Output delle build (PyInstaller, AppImage) e strumenti scaricati dallo script
+build/
+dist/
+tools/
+*.spec

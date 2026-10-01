@@ -236,9 +236,19 @@ La chiave API TMDB viene usata esclusivamente per autenticare le richieste a TMD
 
 Non pubblicare mai la chiave API in repository, screenshot, log o segnalazioni di bug.
 
+## Stato del progetto
+
+MediaTidy è considerato **completo**: non sono previste nuove funzioni. Verranno
+rilasciate solo correzioni per i problemi segnalati nella scheda **Issues**.
+
 ## Licenza
 
-Da definire.
+MediaTidy è distribuito con licenza **MIT**: puoi usarlo, copiarlo, modificarlo e
+ridistribuirlo liberamente, purché venga mantenuta la nota di copyright.
+Il testo completo è nel file [LICENSE](LICENSE).
+
+I pacchetti precompilati includono PyQt5 (GPL v3) e Qt (LGPL v3), distribuiti con
+le rispettive licenze.
 
 ## Crediti
 

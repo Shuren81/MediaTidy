@@ -79,6 +79,7 @@ pyinstaller \
     --paths "${ROOT_DIR}/core" \
     --paths "${ROOT_DIR}/ui" \
     --add-data "${ICON_SOURCE}:." \
+    --add-data "${ROOT_DIR}/assets/tmdb_logo.svg:assets" \
     --collect-all qtpy \
     --collect-all requests \
     "${ROOT_DIR}/media_tidy.py"

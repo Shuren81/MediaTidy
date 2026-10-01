@@ -7,6 +7,7 @@ Le Opzioni (ui/settings_dialog.py) e il Formato Nomi (ui/format_dialog.py)
 sono in moduli propri.
 """
 from config import VERSION
+from platform_utils import resource_path
 from localization import tr
 from media_operations import format_duration, format_size, is_remote
 
@@ -14,8 +15,13 @@ import html
 from datetime import datetime
 from pathlib import Path
 
-from qtpy.QtCore import QUrl, Qt, QTimer, Signal
-from qtpy.QtGui import QColor, QDesktopServices, QKeySequence, QPainter
+from qtpy.QtCore import QRectF, QSize, QUrl, Qt, QTimer, Signal
+from qtpy.QtGui import QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPainter, QPixmap
+
+try:  # modulo Qt per il disegno degli SVG; se manca, il logo TMDB non viene mostrato
+    from qtpy.QtSvg import QSvgRenderer
+except ImportError:  # pragma: no cover
+    QSvgRenderer = None
 from qtpy.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QDialog, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
@@ -228,6 +234,38 @@ class ToggleableListWidget(QTableWidget):
             event.accept()
             return
         super().keyPressEvent(event)
+
+
+TMDB_URL = "https://www.themoviedb.org/"
+# Dimensione di visualizzazione del logo TMDB nei Crediti. I termini di TMDB lo vogliono
+# MENO evidente del marchio dell'applicazione: resta piccolo rispetto al titolo.
+TMDB_LOGO_SIZE = QSize(72, 52)
+
+
+def tmdb_logo_icon():
+    """Icona con il logo TMDB ufficiale (assets/tmdb_logo.svg, mai modificato: stessi colori
+    e proporzioni), disegnato dal vettoriale a 4 volte la dimensione di visualizzazione
+    per restare nitido anche sugli schermi ad alta risoluzione. Ritorna None se il file o
+    il modulo Qt per gli SVG non sono disponibili: il programma funziona comunque."""
+    if QSvgRenderer is None:
+        return None
+    path = resource_path("assets/tmdb_logo.svg")
+    if not path.is_file():
+        return None
+    renderer = QSvgRenderer(str(path))
+    if not renderer.isValid():
+        return None
+    box = renderer.viewBoxF()
+    if box.width() <= 0 or box.height() <= 0:
+        return None
+    width = TMDB_LOGO_SIZE.width() * 4
+    height = width * box.height() / box.width()   # stesse proporzioni dell'originale
+    image = QImage(width, int(round(height)) + 1, QImage.Format_ARGB32)
+    image.fill(Qt.transparent)
+    painter = QPainter(image)
+    renderer.render(painter, QRectF(0, 0, width, height))
+    painter.end()
+    return QIcon(QPixmap.fromImage(image))
 
 
 STATUS_MAX_CHARS = 70
@@ -477,6 +515,22 @@ class CreditsPrivacyDialog(QDialog):
         browser_cred.setOpenExternalLinks(True)
         browser_cred.setHtml(credits_html)
         l_cred.addWidget(browser_cred)
+
+        # Logo TMDB (richiesto dai termini d'uso dell'API): piccolo, cliccabile.
+        tmdb_icon = tmdb_logo_icon()
+        if tmdb_icon is not None:
+            self.btn_tmdb_logo = QPushButton()
+            self.btn_tmdb_logo.setIcon(tmdb_icon)
+            self.btn_tmdb_logo.setIconSize(TMDB_LOGO_SIZE)
+            self.btn_tmdb_logo.setFixedSize(TMDB_LOGO_SIZE + QSize(12, 8))
+            self.btn_tmdb_logo.setFlat(True)
+            self.btn_tmdb_logo.setCursor(Qt.PointingHandCursor)
+            self.btn_tmdb_logo.setToolTip(TMDB_URL)
+            self.btn_tmdb_logo.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(TMDB_URL)))
+            logo_row = QHBoxLayout()
+            logo_row.addWidget(self.btn_tmdb_logo)
+            logo_row.addStretch(1)
+            l_cred.addLayout(logo_row)
         tabs.addTab(tab_credits, "Crediti")
 
         tab_privacy = QWidget()
