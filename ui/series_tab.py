@@ -117,7 +117,7 @@ SERIES_HEADERS = [
 
 def _ep_text(it):
     season, episodes = it.get("season"), it.get("episodes")
-    if not season or not episodes:
+    if season is None or not episodes:   # la stagione 0 (speciali) è valida
         return "?"
     if len(episodes) > 1:
         return f"S{season:02d}E{episodes[0]:02d}-E{episodes[-1]:02d}"
@@ -436,9 +436,9 @@ class SeriesTab(QWidget):
 
         season_in = QSpinBox()
         season_in.setRange(0, 99)
-        season_in.setValue(it.get("season") or 1)
+        season_in.setValue(it["season"] if it.get("season") is not None else 1)
         ep_in = QSpinBox()
-        ep_in.setRange(1, 999)
+        ep_in.setRange(0, 999)   # esiste l'episodio 0 (es. S01E00, S00E00)
         ep_in.setValue((it.get("episodes") or (1,))[0])
         ep_last_in = QSpinBox()
         ep_last_in.setRange(0, 999)

@@ -72,7 +72,8 @@ def make_item(info, abs_path, release_dir):
     Lo cerchiamo risalendo file -> genitore (Season NN) -> nonno (Serie), così un
     file già organizzato da MediaTidy (o rinominato a mano nello stesso formato)
     viene riconosciuto subito, senza rifare la ricerca."""
-    recognized = bool(info.season and info.episodes)
+    # Stagione 0 (speciali) ed episodio 0 sono validi: si controlla "è noto", non "è vero".
+    recognized = info.season is not None and bool(info.episodes)
     parent = abs_path.parent
     grandparent = parent.parent if parent != parent.parent else None
     tmdb_id = extract_tmdb_id(abs_path.name, parent.name, grandparent.name if grandparent else None) or ""
@@ -484,7 +485,7 @@ class SeriesWorker(BatchConflictMixin, QThread):
         it["tmdb_year"] = show_info.get("year", "")
         it["poster_path"] = show_info.get("poster_path") if CONFIG.get("series_download_show_poster", True) else None
 
-        has_episode_code = bool(it.get("season") and it.get("episodes"))
+        has_episode_code = it.get("season") is not None and bool(it.get("episodes"))
         # Stagione/episodio sono obbligatori solo se li ricava il programma: se l'utente
         # ha già impostato nome e cartella a mano (override completo), non bloccano nulla.
         if not has_episode_code and not it.get("custom_override"):

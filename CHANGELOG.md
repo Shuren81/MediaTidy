@@ -4,6 +4,19 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
+## [1.1.3] - 2026-10-01
+
+### Corretto
+
+- La stagione 0 (episodi speciali, es. `S00E01`) non veniva riconosciuta: il
+  programma la leggeva correttamente ma la scartava subito dopo, perché lo zero
+  veniva trattato come "stagione assente". L'episodio finiva in "episodio non
+  riconosciuto" e non si poteva testare né spostare. Ora è gestita in
+  importazione, nel Test e nella colonna Stagione/Episodio.
+- Nella finestra di modifica di stagione ed episodio, la stagione 0 compariva
+  come 1 e confermando si cambiava da sola; il campo episodio non permetteva
+  lo 0 (es. `S01E00`, `S00E00`). Ora entrambi i valori restano quelli reali.
+
 ## [1.1.2] - 2026-10-01
 
 ### Aggiunto

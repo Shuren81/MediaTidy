@@ -190,3 +190,56 @@ def test_series_episode_with_year(tmp_path, fake_tmdb):
         assert out[0].parent.name == "Season 01"
     finally:
         CONFIG["series_year_in_filename"] = False
+
+
+# --------------------------------------------------------------------------- #
+#  Stagione 0 (speciali) ed episodio 0: sono numeri validi, non "assenti"
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("code,season,episode", [("S00E01", 0, 1), ("S01E00", 1, 0), ("S00E00", 0, 0)])
+def test_season_and_episode_zero_are_recognized(tmp_path, fake_tmdb, code, season, episode):
+    src = tmp_path / "Lanterns.S"
+    src.mkdir()
+    (src / f"Lanterns.2026.{code}.720p.mkv").write_bytes(b"EP")
+    dest = tmp_path / "Serie"
+    CONFIG["dest_series"] = str(dest)
+
+    items = sh.collect_items_for_path(str(src), set())
+    assert len(items) == 1
+    it = items[0]
+    assert (it["season"], it["episodes"]) == (season, (episode,))
+    assert it["status"] != "series_status_unknown_ep"      # prima la stagione 0 finiva qui
+
+    it["tmdb_id"] = "7"
+    sh.SeriesWorker(items=items, rows=[], mode="test")._test(0, it)
+    assert it["status"] == "status_ready"
+    assert it["folder"].endswith(f"/Season {season:02d}")
+    assert f"S{season:02d}E{episode:02d}" in it["newname"]
+
+
+def test_season_zero_shown_and_kept_in_edit_dialog(app, monkeypatch):
+    """Nella tabella la stagione 0 non deve diventare "?" e nella finestra di modifica non
+    deve trasformarsi in 1 (confermando si sarebbe cambiata da sola); l'episodio 0 uguale."""
+    from qtpy.QtWidgets import QDialog, QSpinBox
+    from ui.series_tab import SeriesTab, _ep_text
+
+    it = {"path": Path("/tmp/x.mkv"), "release_dir": None, "season": 0, "episodes": (0,),
+          "show_guess": "X", "year_guess": None, "tmdb_id": "7", "tmdb_original": "", "tmdb_localized": "",
+          "tmdb_year": "", "folder": "F/Season 00", "newname": "X - S00E00.mkv",
+          "status": "status_ready", "status_detail": "", "poster_path": None, "custom_override": False,
+          "force_overwrite": False, "lang": None}
+    assert _ep_text(it) == "S00E00"
+
+    tab = SeriesTab()
+    tab.items.append(it)
+    tab.table.insertRow(0)
+    tab.refresh_row(0)
+
+    seen = {}
+
+    def fake_exec(dlg):
+        seen["values"] = [sb.value() for sb in dlg.findChildren(QSpinBox)]
+        return QDialog.Rejected
+
+    monkeypatch.setattr(QDialog, "exec_", fake_exec)
+    tab._edit_unified_dialog(0)
+    assert seen["values"][:2] == [0, 0], seen      # stagione 0 ed episodio 0, non 1 e 1
