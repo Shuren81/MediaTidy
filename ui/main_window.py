@@ -17,7 +17,7 @@ from ui.movie_tab import MovieTab
 from ui.series_tab import SeriesTab
 from ui.settings_dialog import SettingsDialog
 from ui.format_dialog import FormatDialog
-from ui.widgets import ALIGN_CENTER, CreditsPrivacyDialog
+from ui.widgets import ALIGN_CENTER, CreditsPrivacyDialog, open_target
 
 from qtpy.QtCore import QUrl
 from qtpy.QtGui import QDesktopServices
@@ -301,11 +301,10 @@ class MainWindow(QMainWindow):
         try:
             log_dir = get_log_dir()
             log_dir.mkdir(parents=True, exist_ok=True)
-            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir)))
-            if not opened:
-                raise RuntimeError("Il sistema non ha aperto la cartella.")
         except Exception as error:
-            QMessageBox.warning(self, "Cartella log", f"Non è stato possibile aprire la cartella dei log:\n{error}")
+            QMessageBox.warning(self, "Cartella log", f"Non è stato possibile creare la cartella dei log:\n{error}")
+            return
+        open_target(log_dir, self)
 
     def closeEvent(self, event):
         if self.movie_tab.is_busy() or self.series_tab.is_busy():

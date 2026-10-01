@@ -4,6 +4,25 @@ Tutte le modifiche rilevanti di MediaTidy sono documentate in questo file.
 
 Il progetto usa una numerazione di versione nel formato `MAJOR.MINOR.PATCH`.
 
+## [1.1.4] - 2026-10-01
+
+### Corretto
+
+- Il link nelle Opzioni ("Ottienila qui") non si apriva col clic sinistro: la
+  scritta era avvolta in un collegamento e conteneva già un secondo
+  collegamento (annidati), quindi risultava tutta blu e non apribile. Ora è un
+  solo collegamento e la frase è più breve.
+- "Apri cartella" (cartella non vuota, duplicati) e gli altri collegamenti
+  non aprivano nulla, e senza avvisare. Da AppImage/eseguibile Linux, i
+  programmi esterni (xdg-open, browser, file manager) ricevevano i percorsi
+  interni del pacchetto in LD_LIBRARY_PATH e QT_PLUGIN_PATH e non partivano.
+  Ora vengono lanciati con un ambiente ripulito, direttamente con xdg-open
+  (su Windows e macOS con gli strumenti nativi).
+- Se un'apertura fallisce ora compare un messaggio con il motivo, l'indirizzo
+  viene copiato negli appunti e il fatto viene scritto nel log, invece di non
+  dare alcun segno.
+- Stessa gestione per il bottone Log, il logo TMDB e i link di Crediti e Privacy.
+
 ## [1.1.3] - 2026-10-01
 
 ### Corretto

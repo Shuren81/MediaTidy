@@ -8,10 +8,13 @@ Regole decise per la 1.1:
 - su Windows e macOS la destinazione è sempre un percorso locale (disco interno,
   esterno o di rete già montato dal sistema, es. "D:\\Film" o "/Volumes/NAS/Film").
 """
+import contextlib
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 IS_WINDOWS = sys.platform.startswith("win")
@@ -128,3 +131,111 @@ def notify(title, message):
         except Exception:
             return False
     return False
+
+
+# --------------------------------------------------------------------------- #
+#  Apertura di cartelle e link con i programmi di sistema
+# --------------------------------------------------------------------------- #
+# Variabili che un pacchetto PyInstaller/AppImage imposta verso le SUE librerie interne:
+# se restano nell'ambiente, i programmi esterni lanciati da MediaTidy (xdg-open, il
+# browser, il file manager) caricano librerie incompatibili e non partono.
+_BUNDLE_PATH_VARS = ("QT_PLUGIN_PATH", "QML2_IMPORT_PATH", "QML_IMPORT_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH")
+
+
+def _strip_bundle_paths(value, bundle_dir):
+    """Toglie da una lista di percorsi (separati da ':') quelli dentro bundle_dir."""
+    kept = [p for p in value.split(os.pathsep) if p and not (bundle_dir and p.startswith(bundle_dir))]
+    return os.pathsep.join(kept)
+
+
+def child_environment(environ=None):
+    """Ambiente da dare ai programmi esterni: quello attuale, ripulito dai percorsi
+    interni del pacchetto quando MediaTidy gira da AppImage/eseguibile PyInstaller su Linux."""
+    env = dict(os.environ if environ is None else environ)
+    if not (IS_LINUX and getattr(sys, "frozen", False)):
+        return env
+    bundle_dir = getattr(sys, "_MEIPASS", "") or ""
+    orig = env.pop("LD_LIBRARY_PATH_ORIG", None)
+    if orig is not None:
+        env["LD_LIBRARY_PATH"] = orig            # valore che c'era prima dell'avvio
+    elif "LD_LIBRARY_PATH" in env:
+        cleaned = _strip_bundle_paths(env["LD_LIBRARY_PATH"], bundle_dir)
+        if cleaned:
+            env["LD_LIBRARY_PATH"] = cleaned
+        else:
+            env.pop("LD_LIBRARY_PATH")
+    for var in _BUNDLE_PATH_VARS:
+        if var in env:
+            cleaned = _strip_bundle_paths(env[var], bundle_dir)
+            if cleaned:
+                env[var] = cleaned
+            else:
+                env.pop(var)
+    return env
+
+
+@contextlib.contextmanager
+def cleaned_environ():
+    """Applica child_environment() a os.environ per la durata del blocco (serve quando a
+    lanciare il programma esterno è Qt, che usa l'ambiente del processo)."""
+    clean = child_environment()
+    previous = {}
+    for key in set(os.environ) | set(clean):
+        if os.environ.get(key) != clean.get(key):
+            previous[key] = os.environ.get(key)
+            if clean.get(key) is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = clean[key]
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _run_opener(cmd, env, wait=0.8):
+    """Lancia un programma di apertura staccato da MediaTidy. Ritorna (ok, dettagli).
+    Se è ancora in esecuzione dopo qualche secondo (es. un browser appena avviato) conta
+    come riuscito; se esce con errore, riporta il suo messaggio."""
+    with tempfile.TemporaryFile() as err:
+        try:
+            proc = subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=err, start_new_session=True)
+        except OSError as exc:
+            return False, f"{cmd[0]}: {exc}"
+        try:
+            code = proc.wait(timeout=wait)
+        except subprocess.TimeoutExpired:
+            return True, ""
+        if code == 0:
+            return True, ""
+        err.seek(0)
+        text = err.read().decode(errors="replace").strip()
+        return False, f"{cmd[0]}: {text or 'codice di uscita ' + str(code)}"
+
+
+def open_external(target):
+    """Apre una cartella, un file o un indirizzo web con il programma predefinito del
+    sistema. Ritorna (ok, dettagli): i dettagli spiegano l'errore se ok è False."""
+    target = str(target)
+    if IS_WINDOWS:
+        try:
+            os.startfile(target)               # cartelle, file e indirizzi web
+            return True, ""
+        except OSError as exc:
+            return False, str(exc)
+    env = child_environment()
+    if IS_MACOS:
+        return _run_opener(["open", target], env)
+    problems = []
+    for cmd in (["xdg-open", target], ["gio", "open", target]):
+        if shutil.which(cmd[0]):
+            ok, details = _run_opener(cmd, env)
+            if ok:
+                return True, ""
+            problems.append(details)
+    return False, " | ".join(problems) or "né xdg-open né gio sono installati"

@@ -11,7 +11,9 @@ from pathlib import Path
 
 from config import CONFIG, DEFAULT_LOGS_DIR
 from localization import tr
+from ui.widgets import link_handler
 
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -32,10 +34,12 @@ class SettingsDialog(QDialog):
         self.api_input.setPlaceholderText(tr("tmdb_key_placeholder"))  # vuoto = chiave predefinita
         layout.addRow(tr("tmdb_key"), self.api_input)
 
-        help_label = QLabel(
-            f'<a href="https://www.themoviedb.org/documentation/api">{tr("tmdb_link_help")}</a>'
-        )
-        help_label.setOpenExternalLinks(True)
+        # Il testo contiene già il proprio collegamento: non va avvolto in un altro <a>
+        # (collegamenti annidati: tutta la scritta risultava blu e il clic non apriva nulla).
+        help_label = QLabel(tr("tmdb_link_help"))
+        help_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        help_label.setOpenExternalLinks(False)
+        help_label.linkActivated.connect(link_handler(self))
         layout.addRow("", help_label)
 
         # Lingua TMDB (di ricerca)

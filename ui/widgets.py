@@ -7,9 +7,9 @@ Le Opzioni (ui/settings_dialog.py) e il Formato Nomi (ui/format_dialog.py)
 sono in moduli propri.
 """
 from config import VERSION
-from platform_utils import resource_path
+from platform_utils import cleaned_environ, open_external, resource_path
 from localization import tr
-from media_operations import format_duration, format_size, is_remote
+from media_operations import format_duration, format_size, is_remote, log_event
 
 import html
 from datetime import datetime
@@ -29,10 +29,40 @@ from qtpy.QtWidgets import (
 )
 
 
-def _open_folder(path):
-    """Apre una cartella locale nel file manager di sistema (nessun effetto se
-    il percorso non esiste o siamo su una destinazione remota — non chiamarla in quel caso)."""
-    QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+def open_target(target, parent=None):
+    """Apre una cartella locale, un file o un indirizzo web con il programma di sistema.
+    Se non ci riesce NON resta in silenzio: copia l'indirizzo negli appunti, mostra un
+    messaggio con i dettagli e scrive una riga nel log. Ritorna True se è stato aperto."""
+    target = str(target)
+    is_url = "://" in target
+    if not is_url and not Path(target).exists():
+        QMessageBox.warning(parent, tr("open_failed_title"), tr("open_missing_msg", target=target))
+        return False
+    ok, details = open_external(target)
+    if not ok:
+        # Ultima risorsa: l'apertura di Qt, con l'ambiente ripulito dai percorsi del pacchetto.
+        qurl = QUrl(target) if is_url else QUrl.fromLocalFile(target)
+        with cleaned_environ():
+            ok = QDesktopServices.openUrl(qurl)
+    if ok:
+        return True
+    log_event("WARNING", f"Apertura fallita: {target} | {details}")
+    QApplication.clipboard().setText(target)
+    QMessageBox.warning(parent, tr("open_failed_title"), tr("open_failed_msg", target=target, details=details or "-"))
+    return False
+
+
+def _open_folder(path, parent=None):
+    """Apre una cartella locale nel file manager (non chiamarla per destinazioni remote)."""
+    return open_target(path, parent)
+
+
+def link_handler(parent):
+    """Funzione da collegare a linkActivated/anchorClicked: apre l'indirizzo col sistema."""
+    def handle(url):
+        text = url.toString() if hasattr(url, "toString") else str(url)
+        open_target(text, parent)
+    return handle
 
 # Colori del feedback di trascinamento, condivisi da tabelle e finestra principale.
 DRAG_ACTIVE_COLOR = QColor(230, 180, 0)   # giallo: si sta trascinando sopra l'area
@@ -339,11 +369,11 @@ class DuplicateDialog(QDialog):
 
         open_row = QHBoxLayout()
         btn_open_src = QPushButton(tr("dup_open_src"))
-        btn_open_src.clicked.connect(lambda: _open_folder(Path(src_path).parent))
+        btn_open_src.clicked.connect(lambda: _open_folder(Path(src_path).parent, self))
         open_row.addWidget(btn_open_src)
         if not remote:
             btn_open_dst = QPushButton(tr("dup_open_dest"))
-            btn_open_dst.clicked.connect(lambda: _open_folder(target.parent))
+            btn_open_dst.clicked.connect(lambda: _open_folder(target.parent, self))
             open_row.addWidget(btn_open_dst)
         open_row.addStretch(1)
         lay.addLayout(open_row)
@@ -411,7 +441,7 @@ class BatchConflictDialog(QDialog):
             lay.addWidget(box)
             row = QHBoxLayout()
             btn_open = QPushButton(tr("dup_open_src"))
-            btn_open.clicked.connect(lambda _=False, pth=e["path"]: _open_folder(Path(pth).parent))
+            btn_open.clicked.connect(lambda _=False, pth=e["path"]: _open_folder(Path(pth).parent, self))
             btn_keep = QPushButton(tr("conflict_keep_this"))
             btn_keep.clicked.connect(lambda _=False, r=e["row"]: self._select("keep", r))
             row.addWidget(btn_open)
@@ -462,7 +492,7 @@ class NonEmptyDirDialog(QDialog):
         lay.addWidget(lbl)
 
         btn_open = QPushButton(tr("btn_open_folder"))
-        btn_open.clicked.connect(lambda: _open_folder(dir_path))
+        btn_open.clicked.connect(lambda: _open_folder(dir_path, self))
         lay.addWidget(btn_open)
 
         btn_layout = QHBoxLayout()
@@ -512,7 +542,9 @@ class CreditsPrivacyDialog(QDialog):
         <p><b>Licenza:</b> MIT License</p>
         """
         browser_cred = QTextBrowser()
-        browser_cred.setOpenExternalLinks(True)
+        browser_cred.setOpenLinks(False)
+        browser_cred.setOpenExternalLinks(False)
+        browser_cred.anchorClicked.connect(link_handler(self))
         browser_cred.setHtml(credits_html)
         l_cred.addWidget(browser_cred)
 
@@ -526,7 +558,7 @@ class CreditsPrivacyDialog(QDialog):
             self.btn_tmdb_logo.setFlat(True)
             self.btn_tmdb_logo.setCursor(Qt.PointingHandCursor)
             self.btn_tmdb_logo.setToolTip(TMDB_URL)
-            self.btn_tmdb_logo.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(TMDB_URL)))
+            self.btn_tmdb_logo.clicked.connect(lambda: open_target(TMDB_URL, self))
             logo_row = QHBoxLayout()
             logo_row.addWidget(self.btn_tmdb_logo)
             logo_row.addStretch(1)
@@ -545,7 +577,9 @@ class CreditsPrivacyDialog(QDialog):
         </ul>
         """
         browser_priv = QTextBrowser()
-        browser_priv.setOpenExternalLinks(True)
+        browser_priv.setOpenLinks(False)
+        browser_priv.setOpenExternalLinks(False)
+        browser_priv.anchorClicked.connect(link_handler(self))
         browser_priv.setHtml(privacy_html)
         l_priv.addWidget(browser_priv)
         tabs.addTab(tab_privacy, "Privacy Policy")
