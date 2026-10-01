@@ -143,9 +143,10 @@ _BUNDLE_PATH_VARS = ("QT_PLUGIN_PATH", "QML2_IMPORT_PATH", "QML_IMPORT_PATH", "Q
 
 
 def _strip_bundle_paths(value, bundle_dir):
-    """Toglie da una lista di percorsi (separati da ':') quelli dentro bundle_dir."""
-    kept = [p for p in value.split(os.pathsep) if p and not (bundle_dir and p.startswith(bundle_dir))]
-    return os.pathsep.join(kept)
+    """Toglie da una lista di percorsi quelli dentro bundle_dir. Il separatore è sempre
+    ":" e non os.pathsep: serve solo per LD_LIBRARY_PATH e le variabili Qt di Linux."""
+    kept = [p for p in value.split(":") if p and not (bundle_dir and p.startswith(bundle_dir))]
+    return ":".join(kept)
 
 
 def child_environment(environ=None):
