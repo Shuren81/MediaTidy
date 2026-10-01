@@ -2,17 +2,27 @@
 #
 # - Ogni push e ogni pull request: test su tutti e tre i sistemi, poi le tre build,
 #   scaricabili come "Artifacts" dalla pagina dell'esecuzione (scheda Actions).
-# - Un tag che inizia con "v" (es. v1.1.0): in più crea una release in BOZZA con i
-#   tre file allegati, da controllare e pubblicare a mano.
-# - Si può avviare anche a mano: scheda Actions -> Build -> "Run workflow".
+# - Quando PUBBLICHI una release su GitHub (da main o da un branch): costruisce i tre
+#   pacchetti dal codice del tag e li allega da solo alla release. Il file del workflow
+#   deve esistere nel commit a cui punta il tag: una release creata su un ramo che non
+#   lo contiene non avvia nulla.
+# - A mano: scheda Actions -> Build -> "Run workflow". Scrivendo il nome di una release
+#   già esistente nel campo "release_tag", i file vengono allegati a quella release
+#   (sostituendo quelli con lo stesso nome); lasciandolo vuoto restano solo gli Artifacts.
 name: Build
 
 on:
   push:
     branches: ["**"]
-    tags: ["v*"]
   pull_request:
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag di una release già esistente a cui allegare i file (facoltativo)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -150,8 +160,8 @@ jobs:
           retention-days: 30
 
   release:
-    name: Release in bozza
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: Allega i file alla release
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     needs: [build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
     steps:
@@ -159,7 +169,10 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - name: Allega i tre file
+        uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          # La release esiste già (l'hai creata tu): non se ne crea una nuova e non si
+          # tocca lo stato (bozza/pubblicata). I file con lo stesso nome vengono sostituiti.
+          tag_name: ${{ github.event.release.tag_name || inputs.release_tag }}
           files: artifacts/*

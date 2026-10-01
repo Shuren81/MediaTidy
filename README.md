@@ -114,8 +114,8 @@ py media_tidy.py
 
 Il workflow `.github/workflows/build.yml` esegue i test su Linux, Windows e
 macOS a ogni push e crea i tre pacchetti, scaricabili dalla scheda **Actions**
-del repository. Pubblicando un tag che inizia con `v` (es. `v1.1.0`) crea anche
-una release in bozza con i tre file allegati.
+del repository. **Pubblicando una release** su GitHub (da `main` o da un
+branch che contiene il workflow) i tre file vengono allegati in automatico.
 
 ## Configurazione
 

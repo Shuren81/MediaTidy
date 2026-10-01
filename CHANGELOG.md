@@ -13,8 +13,8 @@ Prima versione preparata per Windows e macOS, oltre a Linux.
 - **Build automatiche** con GitHub Actions (`.github/workflows/build.yml`): a
   ogni push i test girano su Linux, Windows e macOS, poi vengono creati
   l'AppImage per Linux, l'`.exe` per Windows e l'`.app` per macOS (Apple
-  Silicon), scaricabili dalla scheda Actions. Un tag `v…` crea anche una
-  release in bozza con i tre file allegati.
+  Silicon), scaricabili dalla scheda Actions. Pubblicando una release (da
+  `main` o da un branch) i tre file vengono allegati in automatico.
 - **Test automatici** (`tests/test_smoke.py`): avvio della finestra, regole
   per sistema, spostamento di un film, correzione delle maiuscole in
   libreria, episodio con l'anno nel nome. Su Windows e macOS girano su
